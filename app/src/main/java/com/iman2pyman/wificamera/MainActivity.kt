@@ -58,29 +58,53 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        title = "WiFi Camera"
+        title = "دوربین کنترل کودک"
         showHome()
     }
 
     private fun baseLayout() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(22, 18, 22, 18)
-        setBackgroundColor(Color.rgb(246, 248, 251))
+        setPadding(22, 20, 22, 20)
+        setBackgroundColor(Color.rgb(239, 248, 255))
         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
     }
 
     private fun text(value: String, size: Float = 16f) = TextView(this).apply {
         text = value
         textSize = size
-        setTextColor(Color.rgb(30, 41, 59))
+        setTextColor(Color.rgb(48, 72, 99))
         gravity = Gravity.CENTER
+        typeface = android.graphics.Typeface.create("sans-serif-rounded", android.graphics.Typeface.NORMAL)
         setPadding(8, 9, 8, 9)
     }
 
     private fun button(value: String, action: () -> Unit) = Button(this).apply {
         text = value
         isAllCaps = false
+        textSize = 16f
+        typeface = android.graphics.Typeface.create("sans-serif-rounded", android.graphics.Typeface.BOLD)
+        setTextColor(Color.WHITE)
+        backgroundTintList = android.content.res.ColorStateList.valueOf(
+            if (value.contains("دریافت") || value.contains("بازگشت") || value.contains("قطع")) Color.rgb(238, 151, 177)
+            else Color.rgb(66, 157, 218)
+        )
+        elevation = 7f
+        stateListAnimator = null
+        setPadding(12, 9, 12, 9)
+        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lp.setMargins(0, 8, 0, 8)
+        layoutParams = lp
         setOnClickListener { action() }
+    }
+
+    private fun addBrandHeader(target: LinearLayout) {
+        val icon = ImageView(this).apply {
+            setImageResource(R.drawable.ic_baby_monitor)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        target.addView(icon, LinearLayout.LayoutParams(116, 116).apply { gravity = Gravity.CENTER })
+        target.addView(text("دوربین کنترل کودک", 27f))
+        target.addView(text("آرامش خاطر، با یک نگاه به کوچولوی شما", 14f))
     }
 
     private fun beginSender() {
@@ -98,18 +122,20 @@ class MainActivity : AppCompatActivity() {
 
     private fun showHome() {
         root = baseLayout()
-        root.addView(text("WiFi Camera", 28f))
-        root.addView(text("اتصال مستقیم دو گوشی؛ بدون مودم و بدون اینترنت"))
-        root.addView(button("ارسال تصویر (گوشی دوربین)") { beginSender() })
-        root.addView(button("دریافت تصویر (گوشی بیننده)") { showViewer() })
-        root.addView(text("گوشی اول شبکه اختصاصی می‌سازد؛ گوشی دوم با رمز یا QR به آن متصل می‌شود.", 13f))
+        root.gravity = Gravity.CENTER_HORIZONTAL
+        addBrandHeader(root)
+        root.addView(text("برای شروع، نقش هر گوشی را انتخاب کنید.", 15f))
+        root.addView(button("📷  گوشی کنار کودک — ارسال تصویر") { beginSender() })
+        root.addView(button("👀  گوشی والدین — مشاهده تصویر") { showViewer() })
+        root.addView(text("اتصال مستقیم دو گوشی، بدون مودم و بدون اینترنت", 13f))
+        root.addView(text("برای حفظ حریم خصوصی، فقط با افراد مورد اعتماد اتصال برقرار کنید.", 12f))
         setContentView(root)
     }
 
     private fun startSenderCamera() {
         stopSender()
         root = baseLayout()
-        root.addView(text("ارسال زنده دوربین", 22f))
+        root.addView(text("📷 ارسال زنده تصویر کوچولو", 22f))
         val preview = PreviewView(this)
         root.addView(preview, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         val status = text("در حال آماده‌سازی دوربین…")
@@ -280,7 +306,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showViewer() {
         root = baseLayout()
-        root.addView(text("دریافت تصویر", 23f))
+        root.addView(text("👶 مشاهده تصویر کودک", 23f))
         root.addView(text("ابتدا گوشی را از طریق QR یا تنظیمات Wi-Fi به شبکه گوشی فرستنده وصل کن."))
         val input = EditText(this).apply {
             hint = "http://192.168.43.1:8080"
@@ -302,7 +328,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showWebViewer(url: String) {
         root = baseLayout()
-        root.addView(text("تصویر زنده", 22f))
+        root.addView(text("تصویر زنده کودک", 22f))
         val web = WebView(this).apply {
             settings.javaScriptEnabled = false
             webViewClient = WebViewClient()
@@ -352,7 +378,7 @@ class MainActivity : AppCompatActivity() {
 
 private class CameraHttpServer(port: Int, private val frameProvider: () -> ByteArray?) : NanoHTTPD(port) {
     override fun serve(session: IHTTPSession): Response = when (session.uri) {
-        "/" -> newFixedLengthResponse(Response.Status.OK, "text/plain; charset=utf-8", "WiFi Camera server is running. Open /viewer on the receiving phone.")
+        "/" -> newFixedLengthResponse(Response.Status.OK, "text/plain; charset=utf-8", "Baby Monitor Camera server is running. Open /viewer on the parent phone.")
         "/viewer" -> newFixedLengthResponse(Response.Status.OK, "text/html; charset=utf-8",
             """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;background:#111;display:flex;align-items:center;justify-content:center;height:100vh}img{width:100%;height:auto;max-height:100vh;object-fit:contain}</style></head><body><img src="/stream" /></body></html>""")
         "/stream" -> streamResponse()
