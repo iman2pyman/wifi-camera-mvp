@@ -181,11 +181,15 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(input)
         root.addView(button("اتصال") {
-            var url = input.text.toString().trim().trimEnd('/')
-            if (!url.startsWith("http://") && !url.startsWith("https://")) url = "http://$url"
-            if (url.isBlank()) {
+            val entered = input.text.toString().trim().trimEnd('/')
+            if (entered.isBlank()) {
                 toast("آدرس گوشی فرستنده را وارد کنید.")
             } else {
+                val url = if (entered.startsWith("http://") || entered.startsWith("https://")) {
+                    entered
+                } else {
+                    "http://$entered"
+                }
                 showWebViewer(url)
             }
         })
@@ -211,6 +215,7 @@ class MainActivity : AppCompatActivity() {
     private fun localIpAddress(): String? {
         try {
             val interfaces = Collections.list(NetworkInterface.getNetworkInterfaces())
+                .sortedBy { if (it.name.startsWith("wlan", ignoreCase = true)) 0 else 1 }
             for (intf in interfaces) {
                 for (addr in Collections.list(intf.inetAddresses)) {
                     if (!addr.isLoopbackAddress && addr is Inet4Address) return addr.hostAddress
