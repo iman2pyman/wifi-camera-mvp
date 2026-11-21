@@ -116,13 +116,14 @@ class MainActivity : AppCompatActivity() {
             try {
                 val provider = providerFuture.get()
                 val previewUseCase = androidx.camera.core.Preview.Builder().build()
-                imageCapture = ImageCapture.Builder()
+                val captureUseCase = ImageCapture.Builder()
                     .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
                     .build()
+                imageCapture = captureUseCase
                 previewUseCase.setSurfaceProvider(preview.surfaceProvider)
                 provider.unbindAll()
                 provider.bindToLifecycle(
-                    this, CameraSelector.DEFAULT_BACK_CAMERA, previewUseCase, imageCapture
+                    this, CameraSelector.DEFAULT_BACK_CAMERA, previewUseCase, captureUseCase
                 )
                 startCaptureLoop()
                 val ip = localIpAddress()
