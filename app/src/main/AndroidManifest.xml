@@ -9,7 +9,9 @@
 
     <application
         android:allowBackup="false"
-        android:label="WiFi Camera"
+        android:label="دوربین کنترل کودک"
+        android:icon="@drawable/ic_baby_monitor"
+        android:roundIcon="@drawable/ic_baby_monitor"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="true">
         <activity
