@@ -19,6 +19,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
@@ -45,8 +46,7 @@ class MainActivity : AppCompatActivity() {
     private val streaming = AtomicBoolean(false)
     @Volatile private var latestJpeg: ByteArray? = null
     private var captureBusy = false
-    private var hotspotReservation: WifiManager.LocalOnlyHotspotReservation? = null
-    private var hotspotCallback: WifiManager.LocalOnlyHotspotCallback? = null
+    private var hotspotReservation: Any? = null
     private var fallbackHotspotMode = false
 
     private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -137,6 +137,7 @@ class MainActivity : AppCompatActivity() {
         }, ContextCompat.getMainExecutor(this))
     }
 
+    @RequiresApi(26)
     private fun startLocalOnlyHotspot(status: TextView) {
         val wifi = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
         val callback = object : WifiManager.LocalOnlyHotspotCallback() {
@@ -178,7 +179,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        hotspotCallback = callback
         try {
             wifi.startLocalOnlyHotspot(callback, android.os.Handler(mainLooper))
             status.text = "درخواست ایجاد شبکه اختصاصی از اندروید ارسال شد…"
@@ -331,9 +331,10 @@ class MainActivity : AppCompatActivity() {
         streaming.set(false)
         try { cameraServer?.stop() } catch (_: Exception) { }
         cameraServer = null
-        try { hotspotReservation?.close() } catch (_: Exception) { }
+        if (Build.VERSION.SDK_INT >= 26) {
+            try { (hotspotReservation as? WifiManager.LocalOnlyHotspotReservation)?.close() } catch (_: Exception) { }
+        }
         hotspotReservation = null
-        hotspotCallback = null
         try { ProcessCameraProvider.getInstance(this).get().unbindAll() } catch (_: Exception) { }
         imageCapture = null
         latestJpeg = null
