@@ -6,6 +6,8 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.wifi.WifiManager
 import android.net.Uri
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.content.Intent
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
@@ -49,7 +51,7 @@ class MainActivity : AppCompatActivity() {
     private val executor = Executors.newSingleThreadExecutor()
     private val streaming = AtomicBoolean(false)
     @Volatile private var latestJpeg: ByteArray? = null
-    private var captureBusy = false
+    @Volatile private var captureBusy = false
     private var hotspotReservation: Any? = null
     private var fallbackHotspotMode = false
 
@@ -344,6 +346,11 @@ class MainActivity : AppCompatActivity() {
             qrScanner.launch(options)
         })
         root.addView(input)
+        if (!scannedSsid.isNullOrBlank()) {
+            root.addView(text("شبکه اسکن‌شده: $scannedSsid", 15f))
+            if (!scannedPassword.isNullOrBlank()) root.addView(text("رمز شبکه: $scannedPassword", 14f))
+            root.addView(text("ابتدا در تنظیمات Wi-Fi به شبکه بالا متصل شو و به همین برنامه برگرد.", 13f))
+        }
         root.addView(button("بازکردن تنظیمات Wi-Fi") {
             startActivity(Intent(android.provider.Settings.ACTION_WIFI_SETTINGS))
         })
@@ -381,16 +388,40 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun bindProcessToWifiNetwork(): Boolean {
+        return try {
+            val manager = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+            val wifi = manager.allNetworks.firstOrNull { network ->
+                manager.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+            }
+            if (wifi == null) false else manager.bindProcessToNetwork(wifi)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     private fun showWebViewer(url: String) {
+        val bound = bindProcessToWifiNetwork()
         root = baseLayout()
         root.addView(text("تصویر زنده کودک", 22f))
+        root.addView(text(if (bound) "اتصال از مسیر Wi-Fi برقرار می‌شود." else "شبکه Wi-Fi پیدا نشد؛ مطمئن شو گوشی گیرنده به شبکه فرستنده وصل است.", 13f))
         val web = WebView(this).apply {
             settings.javaScriptEnabled = false
-            webViewClient = WebViewClient()
+            webViewClient = object : WebViewClient() {
+                override fun onReceivedError(view: WebView, request: android.webkit.WebResourceRequest, error: android.webkit.WebResourceError) {
+                    if (request.isForMainFrame) runOnUiThread {
+                        toast("ارتباط با دوربین برقرار نشد. اتصال Wi-Fi و نشانی فرستنده را بررسی کن.")
+                    }
+                }
+            }
             loadUrl("$url/viewer")
         }
         root.addView(web, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        root.addView(button("قطع اتصال") { web.stopLoading(); showViewer() })
+        root.addView(button("قطع اتصال") {
+            web.stopLoading()
+            try { (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager).bindProcessToNetwork(null) } catch (_: Exception) { }
+            showViewer()
+        })
         setContentView(root)
     }
 
