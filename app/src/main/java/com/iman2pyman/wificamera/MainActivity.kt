@@ -237,7 +237,7 @@ class MainActivity : AppCompatActivity() {
     private fun showHotspotDetails(ssid: String, password: String, ip: String?) {
         root = baseLayout()
         root.addView(text("شبکه اختصاصی آماده است", 22f))
-        root.addView(text("در گوشی دوم، QR را با دوربین یا تنظیمات Wi-Fi اسکن کن."))
+        root.addView(text("در گوشی والدین، برنامه را باز کن و گزینه «اسکن QR اتصال» را بزن."))
         val qr = ImageView(this)
         val endpoint = if (ip != null) "http://$ip:8080" else ""
         val qrData = "babymonitor://connect?ssid=${Uri.encode(ssid)}&password=${Uri.encode(password)}&url=${Uri.encode(endpoint)}"
