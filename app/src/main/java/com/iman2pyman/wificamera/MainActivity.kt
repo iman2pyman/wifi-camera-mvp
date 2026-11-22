@@ -155,7 +155,7 @@ class MainActivity : AppCompatActivity() {
         root = baseLayout()
         root.addView(text("📷 ارسال زنده تصویر کوچولو", 22f))
         val preview = PreviewView(this)
-        root.addView(preview, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.addView(preview, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 230))
         val status = text("در حال آماده‌سازی دوربین…")
         root.addView(status)
         root.addView(button("توقف ارسال") { stopSender(); showHome() })
@@ -235,27 +235,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showHotspotDetails(ssid: String, password: String, ip: String?) {
-        root = baseLayout()
-        root.addView(text("شبکه اختصاصی آماده است", 22f))
-        root.addView(text("در گوشی والدین، برنامه را باز کن و گزینه «اسکن QR اتصال» را بزن."))
+        // Keep the camera preview attached; only append connection details.
+        root.addView(text("شبکه اختصاصی آماده است", 20f))
+        root.addView(text("در گوشی والدین، برنامه را باز کن و گزینه «اسکن QR اتصال» را بزن.", 14f))
         val qr = ImageView(this)
         val endpoint = if (ip != null) "http://$ip:8080" else ""
         val qrData = "babymonitor://connect?ssid=${Uri.encode(ssid)}&password=${Uri.encode(password)}&url=${Uri.encode(endpoint)}"
-        try {
-            qr.setImageBitmap(makeQr(qrData))
-            root.addView(qr, LinearLayout.LayoutParams(260, 260).apply { gravity = Gravity.CENTER })
-        } catch (_: Exception) { }
-        root.addView(text("نام شبکه: $ssid"))
-        root.addView(text(if (password.isBlank()) "رمز: بدون رمز" else "رمز شبکه: $password"))
-        root.addView(text(if (ip != null) "پس از اتصال گوشی دوم، در برنامه گیرنده این نشانی را وارد کن:\nhttp://$ip:8080" else "شبکه فعال است؛ در حال شناسایی نشانی محلی…"))
-        root.addView(button("به‌روزرسانی نشانی") {
-            val current = localIpAddress()
-            toast(if (current == null) "نشانی شبکه هنوز پیدا نشد." else "نشانی سرور: http://$current:8080")
-        })
+        try { qr.setImageBitmap(makeQr(qrData)); root.addView(qr, LinearLayout.LayoutParams(190, 190).apply { gravity = Gravity.CENTER }) } catch (_: Exception) { }
+        root.addView(text("نام شبکه: $ssid", 14f))
+        root.addView(text(if (password.isBlank()) "رمز: بدون رمز" else "رمز شبکه: $password", 14f))
+        root.addView(text(if (ip != null) "نشانی تصویر: http://$ip:8080" else "شبکه فعال است؛ در حال شناسایی نشانی محلی…", 13f))
         root.addView(button("توقف ارسال") { stopSender(); showHome() })
-        setContentView(root)
     }
-
     private fun showManualHotspotFallback(status: TextView) {
         fallbackHotspotMode = true
         status.text = "این گوشی از هات‌اسپات محلی برنامه‌ای پشتیبانی نکرد. هات‌اسپات گوشی را دستی روشن کن."
@@ -466,7 +457,12 @@ private class CameraHttpServer(port: Int, private val frameProvider: () -> ByteA
     override fun serve(session: IHTTPSession): Response = when (session.uri) {
         "/" -> newFixedLengthResponse(Response.Status.OK, "text/plain; charset=utf-8", "Baby Monitor Camera server is running. Open /viewer on the parent phone.")
         "/viewer" -> newFixedLengthResponse(Response.Status.OK, "text/html; charset=utf-8",
-            """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;background:#111;display:flex;align-items:center;justify-content:center;height:100vh}img{width:100%;height:auto;max-height:100vh;object-fit:contain}</style></head><body><img src="/stream" /></body></html>""")
+            """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;background:#111;display:flex;align-items:center;justify-content:center;height:100vh}img{width:100%;height:auto;max-height:100vh;object-fit:contain}</style></head><body><img id="live" alt="Waiting for camera"><script>const img=document.getElementById('live');function refresh(){img.src='/snapshot.jpg?t='+Date.now()}refresh();setInterval(refresh,350);</script></body></html>""")
+        "/snapshot.jpg" -> {
+            val frame = frameProvider()
+            if (frame == null) newFixedLengthResponse(Response.Status.SERVICE_UNAVAILABLE, "text/plain", "Camera is starting")
+            else newFixedLengthResponse(Response.Status.OK, "image/jpeg", java.io.ByteArrayInputStream(frame), frame.size.toLong())
+        }
         "/stream" -> streamResponse()
         else -> newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Not found")
     }
