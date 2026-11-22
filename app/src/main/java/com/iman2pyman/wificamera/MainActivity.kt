@@ -154,7 +154,9 @@ class MainActivity : AppCompatActivity() {
         stopSender()
         root = baseLayout()
         root.addView(text("📷 ارسال زنده تصویر کوچولو", 22f))
-        val preview = PreviewView(this)
+        val preview = PreviewView(this).apply {
+            implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+        }
         root.addView(preview, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 230))
         val status = text("در حال آماده‌سازی دوربین…")
         root.addView(status)
@@ -296,21 +298,23 @@ class MainActivity : AppCompatActivity() {
                 val capture = imageCapture
                 if (capture != null && !captureBusy) {
                     captureBusy = true
-                    capture.takePicture(executor, object : ImageCapture.OnImageCapturedCallback() {
-                        override fun onCaptureSuccess(image: androidx.camera.core.ImageProxy) {
+                    // Save through CameraX's JPEG encoder. Copying plane[0] from
+                    // an ImageProxy is not a valid JPEG on devices that return YUV.
+                    val frameFile = java.io.File(cacheDir, "baby-monitor-frame.jpg")
+                    val outputOptions = ImageCapture.OutputFileOptions.Builder(frameFile).build()
+                    capture.takePicture(outputOptions, executor, object : ImageCapture.OnImageSavedCallback {
+                        override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                             try {
-                                val buffer = image.planes[0].buffer
-                                val bytes = ByteArray(buffer.remaining())
-                                buffer.get(bytes)
+                                val bytes = frameFile.readBytes()
                                 if (bytes.isNotEmpty()) latestJpeg = bytes
                             } catch (_: Exception) {
                             } finally {
-                                image.close()
                                 captureBusy = false
                             }
                         }
                         override fun onError(exception: ImageCaptureException) {
                             captureBusy = false
+                            runOnUiThread { toast("خطای دریافت تصویر دوربین: ${exception.message}") }
                         }
                     })
                 }
