@@ -51,6 +51,8 @@ class MainActivity : AppCompatActivity() {
     private val executor = Executors.newSingleThreadExecutor()
     private val streaming = AtomicBoolean(false)
     @Volatile private var latestJpeg: ByteArray? = null
+    @Volatile private var latestFrameAt: Long = 0L
+    private var senderNetworkStatus: TextView? = null
     @Volatile private var captureBusy = false
     private var hotspotReservation: Any? = null
     private var fallbackHotspotMode = false
@@ -159,6 +161,7 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(preview, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 230))
         val status = text("در حال آماده‌سازی دوربین…")
+        senderNetworkStatus = status
         root.addView(status)
         root.addView(button("توقف ارسال") { stopSender(); showHome() })
         setContentView(root)
@@ -215,7 +218,10 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onStopped() {
-                runOnUiThread { toast("شبکه محلی متوقف شد.") }
+                runOnUiThread {
+                    senderNetworkStatus?.text = "ارتباط Wi-Fi قطع شد؛ شبکه اختصاصی متوقف شده است."
+                    toast("شبکه محلی متوقف شد. برای ادامه، ارسال را دوباره آغاز کن.")
+                }
             }
 
             override fun onFailed(reason: Int) {
@@ -247,6 +253,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(text("نام شبکه: $ssid", 14f))
         root.addView(text(if (password.isBlank()) "رمز: بدون رمز" else "رمز شبکه: $password", 14f))
         root.addView(text(if (ip != null) "نشانی تصویر: http://$ip:8080" else "شبکه فعال است؛ در حال شناسایی نشانی محلی…", 13f))
+        senderNetworkStatus?.text = "شبکه آماده است؛ منتظر اتصال گوشی والدین…"
         root.addView(button("توقف ارسال") { stopSender(); showHome() })
     }
     private fun showManualHotspotFallback(status: TextView) {
@@ -284,7 +291,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startHttpServer() {
         if (cameraServer != null) return
-        val server = CameraHttpServer(8080) { latestJpeg }
+        val server = CameraHttpServer(8080, { latestJpeg }, { latestFrameAt })
         server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
         cameraServer = server
     }
@@ -306,7 +313,7 @@ class MainActivity : AppCompatActivity() {
                         override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                             try {
                                 val bytes = frameFile.readBytes()
-                                if (bytes.isNotEmpty()) latestJpeg = bytes
+                                if (bytes.isNotEmpty()) { latestJpeg = bytes; latestFrameAt = android.os.SystemClock.elapsedRealtime() }
                             } catch (_: Exception) {
                             } finally {
                                 captureBusy = false
@@ -445,6 +452,8 @@ class MainActivity : AppCompatActivity() {
         try { ProcessCameraProvider.getInstance(this).get().unbindAll() } catch (_: Exception) { }
         imageCapture = null
         latestJpeg = null
+        latestFrameAt = 0L
+        senderNetworkStatus = null
         fallbackHotspotMode = false
     }
 
@@ -457,11 +466,19 @@ class MainActivity : AppCompatActivity() {
     }
 }
 
-private class CameraHttpServer(port: Int, private val frameProvider: () -> ByteArray?) : NanoHTTPD(port) {
+private class CameraHttpServer(port: Int, private val frameProvider: () -> ByteArray?, private val frameTimeProvider: () -> Long) : NanoHTTPD(port) {
     override fun serve(session: IHTTPSession): Response = when (session.uri) {
         "/" -> newFixedLengthResponse(Response.Status.OK, "text/plain; charset=utf-8", "Baby Monitor Camera server is running. Open /viewer on the parent phone.")
         "/viewer" -> newFixedLengthResponse(Response.Status.OK, "text/html; charset=utf-8",
-            """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;background:#111;display:flex;align-items:center;justify-content:center;height:100vh}img{width:100%;height:auto;max-height:100vh;object-fit:contain}</style></head><body><img id="live" alt="Waiting for camera"><script>const img=document.getElementById('live');function refresh(){img.src='/snapshot.jpg?t='+Date.now()}refresh();setInterval(refresh,350);</script></body></html>""")
+            """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;background:#111;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh}#wrap{width:100%;text-align:center}img{width:100%;max-height:88vh;object-fit:contain}#state{padding:14px;font-size:18px}</style></head><body><div id="wrap"><div id="state">در حال بررسی ارتباط با گوشی فرستنده…</div><img id="live" style="display:none" alt="Camera"></div><script>const img=document.getElementById('live'),state=document.getElementById('state');let ready=false;async function check(){try{const r=await fetch('/status?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('server');const s=await r.json();if(!s.cameraReady){state.textContent=s.message||'گوشی وصل است؛ در انتظار آماده‌شدن دوربین…';img.style.display='none';ready=false;return;}state.textContent='تصویر زنده برقرار است';img.style.display='block';if(!ready){img.src='/snapshot.jpg?t='+Date.now();ready=true;}}catch(e){state.textContent='ارتباط با گوشی فرستنده قطع است؛ Wi-Fi و روشن‌بودن برنامه را بررسی کنید.';img.style.display='none';ready=false;}}check();setInterval(check,1000);setInterval(()=>{if(ready)img.src='/snapshot.jpg?t='+Date.now()},700);</script></body></html>""")
+        "/status" -> {
+            val frameAt = frameTimeProvider()
+            val age = if (frameAt == 0L) Long.MAX_VALUE else android.os.SystemClock.elapsedRealtime() - frameAt
+            val ready = frameProvider() != null && age < 5000L
+            val message = if (ready) "تصویر زنده برقرار است" else if (frameAt == 0L) "شبکه و سرور وصل‌اند؛ هنوز اولین تصویر دوربین دریافت نشده است." else "گوشی وصل است، اما ارسال تصویر متوقف یا کند شده است."
+            val json = """{"server":"online","cameraReady":$ready,"frameAgeMs":\${if (age == Long.MAX_VALUE) -1 else age},"message":"$message"}"""
+            newFixedLengthResponse(Response.Status.OK, "application/json; charset=utf-8", json)
+        }
         "/snapshot.jpg" -> {
             val frame = frameProvider()
             if (frame == null) newFixedLengthResponse(Response.Status.SERVICE_UNAVAILABLE, "text/plain", "Camera is starting")
