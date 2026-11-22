@@ -5,6 +5,10 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.wifi.WifiManager
+import android.net.Uri
+import android.content.Intent
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import android.os.Build
 import android.os.Bundle
 import android.text.InputType
@@ -48,6 +52,18 @@ class MainActivity : AppCompatActivity() {
     private var captureBusy = false
     private var hotspotReservation: Any? = null
     private var fallbackHotspotMode = false
+
+    private var scannedSsid: String? = null
+    private var scannedPassword: String? = null
+    private var scannedUrl: String? = null
+    private val qrScanner = registerForActivityResult(ScanContract()) { result ->
+        val contents = result.contents
+        if (contents.isNullOrBlank()) {
+            toast("اسکن QR لغو شد.")
+        } else {
+            handleScannedQr(contents)
+        }
+    }
 
     private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) requestWifiPermissionAndStart() else toast("برای ارسال تصویر، اجازه دوربین لازم است.")
@@ -221,8 +237,8 @@ class MainActivity : AppCompatActivity() {
         root.addView(text("شبکه اختصاصی آماده است", 22f))
         root.addView(text("در گوشی دوم، QR را با دوربین یا تنظیمات Wi-Fi اسکن کن."))
         val qr = ImageView(this)
-        val qrData = if (password.isBlank()) "WIFI:T:nopass;S:$ssid;;"
-            else "WIFI:T:WPA;S:$ssid;P:$password;;"
+        val endpoint = if (ip != null) "http://$ip:8080" else ""
+        val qrData = "babymonitor://connect?ssid=${Uri.encode(ssid)}&password=${Uri.encode(password)}&url=${Uri.encode(endpoint)}"
         try {
             qr.setImageBitmap(makeQr(qrData))
             root.addView(qr, LinearLayout.LayoutParams(260, 260).apply { gravity = Gravity.CENTER })
@@ -287,14 +303,21 @@ class MainActivity : AppCompatActivity() {
                 val capture = imageCapture
                 if (capture != null && !captureBusy) {
                     captureBusy = true
-                    val output = ImageCapture.OutputFileOptions.Builder(java.io.File(cacheDir, "latest-camera-frame.jpg")).build()
-                    capture.takePicture(output, executor, object : ImageCapture.OnImageSavedCallback {
-                        override fun onImageSaved(result: ImageCapture.OutputFileResults) {
-                            try { latestJpeg = java.io.File(cacheDir, "latest-camera-frame.jpg").readBytes() } catch (_: Exception) { }
-                            runOnUiThread { captureBusy = false }
+                    capture.takePicture(executor, object : ImageCapture.OnImageCapturedCallback() {
+                        override fun onCaptureSuccess(image: androidx.camera.core.ImageProxy) {
+                            try {
+                                val buffer = image.planes[0].buffer
+                                val bytes = ByteArray(buffer.remaining())
+                                buffer.get(bytes)
+                                if (bytes.isNotEmpty()) latestJpeg = bytes
+                            } catch (_: Exception) {
+                            } finally {
+                                image.close()
+                                captureBusy = false
+                            }
                         }
                         override fun onError(exception: ImageCaptureException) {
-                            runOnUiThread { captureBusy = false }
+                            captureBusy = false
                         }
                     })
                 }
@@ -307,16 +330,26 @@ class MainActivity : AppCompatActivity() {
     private fun showViewer() {
         root = baseLayout()
         root.addView(text("👶 مشاهده تصویر کودک", 23f))
-        root.addView(text("ابتدا گوشی را از طریق QR یا تنظیمات Wi-Fi به شبکه گوشی فرستنده وصل کن."))
+        root.addView(text("با دکمه زیر QR نمایش‌داده‌شده روی گوشی کنار کودک را اسکن کن."))
         val input = EditText(this).apply {
             hint = "http://192.168.43.1:8080"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             setSingleLine(true)
+            scannedUrl?.let { setText(it) }
         }
+        root.addView(button("اسکن QR اتصال") {
+            val options = ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                .setPrompt("کد QR گوشی کنار کودک را اسکن کنید")
+                .setBeepEnabled(false).setOrientationLocked(false)
+            qrScanner.launch(options)
+        })
         root.addView(input)
-        root.addView(button("اتصال") {
+        root.addView(button("بازکردن تنظیمات Wi-Fi") {
+            startActivity(Intent(android.provider.Settings.ACTION_WIFI_SETTINGS))
+        })
+        root.addView(button("نمایش تصویر زنده") {
             val entered = input.text.toString().trim().trimEnd('/')
-            if (entered.isBlank()) toast("آدرس گوشی فرستنده را وارد کن.")
+            if (entered.isBlank()) toast("ابتدا QR را اسکن یا آدرس فرستنده را وارد کن.")
             else {
                 val url = if (entered.startsWith("http://") || entered.startsWith("https://")) entered else "http://$entered"
                 showWebViewer(url)
@@ -324,6 +357,28 @@ class MainActivity : AppCompatActivity() {
         })
         root.addView(button("بازگشت") { showHome() })
         setContentView(root)
+    }
+
+    private fun handleScannedQr(contents: String) {
+        try {
+            val uri = Uri.parse(contents)
+            if (uri.scheme != "babymonitor" || uri.host != "connect") {
+                toast("این QR مربوط به اتصال دوربین کودک نیست.")
+                return
+            }
+            scannedSsid = uri.getQueryParameter("ssid")
+            scannedPassword = uri.getQueryParameter("password")
+            scannedUrl = uri.getQueryParameter("url")?.takeIf { it.isNotBlank() }
+            showViewer()
+            val message = buildString {
+                append("شبکه پیدا شد: ${scannedSsid ?: "نامشخص"}")
+                if (!scannedPassword.isNullOrBlank()) append("\nرمز Wi-Fi: $scannedPassword")
+                append("\nابتدا به همین شبکه وصل شو؛ سپس نمایش تصویر زنده را بزن.")
+            }
+            toast(message)
+        } catch (_: Exception) {
+            toast("خواندن QR ناموفق بود.")
+        }
     }
 
     private fun showWebViewer(url: String) {
