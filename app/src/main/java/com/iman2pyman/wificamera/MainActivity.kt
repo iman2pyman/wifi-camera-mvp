@@ -289,9 +289,22 @@ class MainActivity : AppCompatActivity() {
         return Bitmap.createBitmap(pixels, 420, 420, Bitmap.Config.RGB_565)
     }
 
+    private fun currentBatteryPercent(): Int {
+        return try {
+            val manager = getSystemService(BATTERY_SERVICE) as android.os.BatteryManager
+            val level = manager.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY)
+            if (level in 0..100) level else {
+                val battery = registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                val current = battery?.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) ?: -1
+                val scale = battery?.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, -1) ?: -1
+                if (current >= 0 && scale > 0) (current * 100) / scale else -1
+            }
+        } catch (_: Exception) { -1 }
+    }
+
     private fun startHttpServer() {
         if (cameraServer != null) return
-        val server = CameraHttpServer(8080, { latestJpeg }, { latestFrameAt })
+        val server = CameraHttpServer(8080, { latestJpeg }, { latestFrameAt }, { currentBatteryPercent() })
         server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
         cameraServer = server
     }
@@ -474,17 +487,72 @@ class MainActivity : AppCompatActivity() {
     }
 }
 
-private class CameraHttpServer(port: Int, private val frameProvider: () -> ByteArray?, private val frameTimeProvider: () -> Long) : NanoHTTPD(port) {
+private class CameraHttpServer(
+    port: Int,
+    private val frameProvider: () -> ByteArray?,
+    private val frameTimeProvider: () -> Long,
+    private val batteryProvider: () -> Int
+) : NanoHTTPD(port) {
     override fun serve(session: IHTTPSession): Response = when (session.uri) {
         "/" -> newFixedLengthResponse(Response.Status.OK, "text/plain; charset=utf-8", "Baby Monitor Camera server is running. Open /viewer on the parent phone.")
         "/viewer" -> newFixedLengthResponse(Response.Status.OK, "text/html; charset=utf-8",
-            """<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{margin:0;background:#111;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh}#wrap{width:100%;text-align:center}img{width:100%;max-height:88vh;object-fit:contain}#state{padding:14px;font-size:18px}</style></head><body><div id="wrap"><div id="state">در حال بررسی ارتباط با گوشی فرستنده…</div><img id="live" style="display:none" alt="Camera"></div><script>const img=document.getElementById('live'),state=document.getElementById('state');let ready=false;async function check(){try{const r=await fetch('/status?t='+Date.now(),{cache:'no-store'});if(!r.ok)throw Error('server');const s=await r.json();if(!s.cameraReady){state.textContent=s.message||'گوشی وصل است؛ در انتظار آماده‌شدن دوربین…';img.style.display='none';ready=false;return;}state.textContent='تصویر زنده برقرار است';img.style.display='block';if(!ready){img.src='/snapshot.jpg?t='+Date.now();ready=true;}}catch(e){state.textContent='ارتباط با گوشی فرستنده قطع است؛ Wi-Fi و روشن‌بودن برنامه را بررسی کنید.';img.style.display='none';ready=false;}}check();setInterval(check,1000);setInterval(()=>{if(ready)img.src='/snapshot.jpg?t='+Date.now()},700);</script></body></html>""")
+            """<!doctype html><html lang="fa" dir="rtl"><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta charset="utf-8"><style>
+            *{box-sizing:border-box}body{margin:0;background:#eff8ff;color:#304863;font-family:sans-serif;padding:12px}
+            header{text-align:center;font-size:22px;font-weight:bold;padding:8px}
+            #connection{background:#fff;border-radius:14px;padding:12px;margin:8px 0;box-shadow:0 2px 8px #0001}
+            .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.item{background:#f5f9fc;border-radius:10px;padding:10px;text-align:center}
+            .value{display:block;font-size:17px;font-weight:bold;margin-top:5px}.ok{color:#16865b}.warn{color:#bd7b16}.bad{color:#c43d58}
+            #state{padding:9px;text-align:center;font-size:14px}#stage{background:#111;border-radius:12px;min-height:48vh;display:flex;align-items:center;justify-content:center;overflow:hidden}
+            #live{width:100%;max-height:66vh;object-fit:contain}#hint{text-align:center;font-size:12px;color:#60758b;padding:8px}
+            </style></head><body><header>👶 دوربین کنترل کودک</header>
+            <section id="connection"><div class="grid">
+            <div class="item">اتصال گوشی<span id="net" class="value warn">در حال بررسی…</span></div>
+            <div class="item">باتری گوشی کودک<span id="battery" class="value">--</span></div>
+            <div class="item">وضعیت دوربین<span id="camera" class="value warn">در انتظار</span></div>
+            <div class="item">تازگی تصویر<span id="fresh" class="value">--</span></div>
+            </div><div id="state">در حال بررسی ارتباط با گوشی فرستنده…</div></section>
+            <div id="stage"><img id="live" style="display:none" alt="تصویر زنده کودک"></div>
+            <div id="hint">ارتباط مستقیم محلی · بدون نیاز به اینترنت</div>
+            <script>
+            const img=document.getElementById('live'),state=document.getElementById('state');
+            const net=document.getElementById('net'),battery=document.getElementById('battery');
+            const camera=document.getElementById('camera'),fresh=document.getElementById('fresh');
+            let ready=false;
+            function label(el,value,kind){el.textContent=value;el.className='value '+kind}
+            async function check(){
+              try{
+                const r=await fetch('/status?t='+Date.now(),{cache:'no-store'});
+                if(!r.ok)throw Error('server');
+                const s=await r.json();
+                label(net,'متصل','ok');
+                label(battery,s.batteryPercent>=0?s.batteryPercent+'٪':'نامشخص',s.batteryPercent>=20?'ok':'warn');
+                if(s.cameraReady){
+                  label(camera,'فعال','ok');label(fresh,'تازه','ok');
+                  state.textContent='تصویر زنده در حال دریافت است';state.className='ok';
+                  img.style.display='block';
+                  if(!ready){img.src='/snapshot.jpg?t='+Date.now();ready=true;}
+                }else{
+                  label(camera,'آماده نیست','warn');label(fresh,'بدون تصویر','warn');
+                  state.textContent=s.message||'شبکه وصل است؛ منتظر آماده‌شدن دوربین…';
+                  state.className='warn';img.style.display='none';ready=false;
+                }
+              }catch(e){
+                label(net,'قطع ارتباط','bad');label(camera,'نامشخص','bad');
+                label(fresh,'دریافت نمی‌شود','bad');state.textContent='ارتباط با گوشی فرستنده قطع است؛ Wi-Fi و روشن‌بودن برنامه را بررسی کنید.';
+                state.className='bad';img.style.display='none';ready=false;
+                label(battery,'در دسترس نیست','bad');
+              }
+            }
+            check();setInterval(check,1500);
+            setInterval(()=>{if(ready)img.src='/snapshot.jpg?t='+Date.now()},700);
+            </script></body></html>""")
         "/status" -> {
             val frameAt = frameTimeProvider()
             val age = if (frameAt == 0L) Long.MAX_VALUE else android.os.SystemClock.elapsedRealtime() - frameAt
             val ready = frameProvider() != null && age < 5000L
             val message = if (ready) "تصویر زنده برقرار است" else if (frameAt == 0L) "شبکه و سرور وصل‌اند؛ هنوز اولین تصویر دوربین دریافت نشده است." else "گوشی وصل است، اما ارسال تصویر متوقف یا کند شده است."
-            val json = """{"server":"online","cameraReady":$ready,"frameAgeMs":${if (age == Long.MAX_VALUE) -1 else age},"message":"$message"}"""
+            val battery = batteryProvider()
+            val json = """{"server":"online","cameraReady":$ready,"frameAgeMs":${if (age == Long.MAX_VALUE) -1 else age},"batteryPercent":$battery,"message":"$message"}"""
             newFixedLengthResponse(Response.Status.OK, "application/json; charset=utf-8", json)
         }
         "/snapshot.jpg" -> {
