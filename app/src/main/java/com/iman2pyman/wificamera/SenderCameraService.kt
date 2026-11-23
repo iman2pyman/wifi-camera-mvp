@@ -18,6 +18,7 @@ import android.util.Size
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
+import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
@@ -29,6 +30,7 @@ object SenderCameraRuntime {
     @Volatile var latestJpeg: ByteArray? = null
     @Volatile var latestFrameAt: Long = 0L
     @Volatile var lastError: String? = null
+    @Volatile var previewSurfaceProvider: Preview.SurfaceProvider? = null
 }
 
 class SenderCameraService : LifecycleService() {
@@ -66,6 +68,8 @@ class SenderCameraService : LifecycleService() {
         future.addListener({
             try {
                 val provider = future.get()
+                val preview = Preview.Builder().build()
+                SenderCameraRuntime.previewSurfaceProvider?.let { preview.setSurfaceProvider(it) }
                 val analysis = ImageAnalysis.Builder()
                     .setTargetResolution(Size(640, 480))
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
@@ -83,7 +87,7 @@ class SenderCameraService : LifecycleService() {
                     } finally { frame.close() }
                 }
                 provider.unbindAll()
-                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, analysis)
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis)
             } catch (e: Exception) {
                 SenderCameraRuntime.lastError = e.message ?: "راه‌اندازی دوربین ناموفق بود"
             }
