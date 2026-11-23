@@ -14,6 +14,8 @@ import android.graphics.Rect
 import android.graphics.YuvImage
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
+import android.net.wifi.WifiManager
 import android.util.Size
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -35,10 +37,26 @@ object SenderCameraRuntime {
 
 class SenderCameraService : LifecycleService() {
     private val cameraExecutor = Executors.newSingleThreadExecutor()
+    private var cpuWakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        try {
+            val power = getSystemService(POWER_SERVICE) as PowerManager
+            cpuWakeLock = power.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BabyMonitor:Camera").apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+            val wifi = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
+            wifiLock = wifi.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "BabyMonitor:WiFi").apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        } catch (e: Exception) {
+            SenderCameraRuntime.lastError = "فعال‌سازی قفل پردازنده/وای‌فای ناموفق بود: ${e.message}"
+        }
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_baby_monitor)
             .setContentTitle("دوربین کنترل کودک فعال است")
@@ -153,6 +171,10 @@ class SenderCameraService : LifecycleService() {
     override fun onDestroy() {
         try { ProcessCameraProvider.getInstance(this).get().unbindAll() } catch (_: Exception) { }
         cameraExecutor.shutdown()
+        try { if (cpuWakeLock?.isHeld == true) cpuWakeLock?.release() } catch (_: Exception) { }
+        try { if (wifiLock?.isHeld == true) wifiLock?.release() } catch (_: Exception) { }
+        cpuWakeLock = null
+        wifiLock = null
         SenderCameraRuntime.latestJpeg = null
         SenderCameraRuntime.latestFrameAt = 0L
         super.onDestroy()
