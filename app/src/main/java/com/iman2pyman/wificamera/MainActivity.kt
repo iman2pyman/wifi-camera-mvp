@@ -538,7 +538,7 @@ class MainActivity : AppCompatActivity() {
                             connection.connectTimeout = 2500
                             connection.readTimeout = 2500
                             connection.setRequestProperty("Content-Type", "application/octet-stream")
-                            connection.setRequestProperty("Content-Length", n.toString())
+                            connection.setFixedLengthStreamingMode(n)
                             connection.outputStream.use { it.write(buffer, 0, n) }
                             val code = connection.responseCode
                             if (code !in 200..299) connection.errorStream?.close()
