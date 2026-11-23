@@ -125,6 +125,24 @@ class SenderCameraService : LifecycleService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
+        if (intent?.getBooleanExtra("enable_audio", false) == true &&
+            Build.VERSION.SDK_INT >= 29 &&
+            ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            try {
+                val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+                    .setSmallIcon(R.drawable.ic_baby_monitor)
+                    .setContentTitle("دوربین کنترل کودک فعال است")
+                    .setContentText("تصویر و صدای محیط در پس‌زمینه ارسال می‌شود")
+                    .setCategory(NotificationCompat.CATEGORY_SERVICE)
+                    .setOngoing(true)
+                    .setOnlyAlertOnce(true)
+                    .build()
+                startForeground(NOTIFICATION_ID, notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            } catch (e: Exception) {
+                SenderCameraRuntime.lastError = "فعال‌سازی صدای پس‌زمینه ناموفق بود: ${e.message}"
+            }
+        }
         return Service.START_STICKY
     }
 
