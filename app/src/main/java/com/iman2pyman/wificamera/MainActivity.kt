@@ -892,9 +892,18 @@ private class CameraHttpServer(
             newFixedLengthResponse(Response.Status.OK, "application/json; charset=utf-8", json)
         }
         "/ambient" -> {
+            val since = session.parameters["since"]?.firstOrNull()?.toLongOrNull() ?: 0L
+            val deadline = System.currentTimeMillis() + 900L
+            while (audioSequenceProvider() <= since && System.currentTimeMillis() < deadline) {
+                try { Thread.sleep(12) } catch (_: InterruptedException) { break }
+            }
+            val sequence = audioSequenceProvider()
             val audio = audioProvider()
-            if (audio == null) newFixedLengthResponse(Response.Status.NO_CONTENT, "application/octet-stream", "")
-            else newFixedLengthResponse(Response.Status.OK, "application/octet-stream", java.io.ByteArrayInputStream(audio), audio.size.toLong())
+            if (audio == null || sequence <= since) newFixedLengthResponse(Response.Status.NO_CONTENT, "application/octet-stream", "")
+            else newFixedLengthResponse(Response.Status.OK, "application/octet-stream", java.io.ByteArrayInputStream(audio), audio.size.toLong()).apply {
+                addHeader("X-Audio-Sequence", sequence.toString())
+                addHeader("Cache-Control", "no-store")
+            }
         }
         "/talk" -> {
             try {
@@ -922,15 +931,18 @@ private class CameraHttpServer(
         val output = java.io.PipedOutputStream(input)
         val worker = Thread {
             try {
+                var lastFrameAt = 0L
                 while (!Thread.currentThread().isInterrupted) {
+                    val frameAt = frameTimeProvider()
                     val frame = frameProvider()
-                    if (frame != null) {
+                    if (frame != null && frameAt > lastFrameAt) {
                         output.write("--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.size}\r\n\r\n".toByteArray())
                         output.write(frame)
                         output.write("\r\n".toByteArray())
                         output.flush()
+                        lastFrameAt = frameAt
                     }
-                    Thread.sleep(120)
+                    Thread.sleep(25)
                 }
             } catch (_: Exception) {
             } finally { try { output.close() } catch (_: Exception) { } }
