@@ -176,7 +176,7 @@ class MainActivity : AppCompatActivity() {
             isFillViewport = true
             clipToPadding = false
             setPadding(0, 0, 0, dp(8))
-            addView(root, ScrollView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(root, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
         val hero = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
