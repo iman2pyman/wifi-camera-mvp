@@ -628,7 +628,8 @@ private class CameraHttpServer(
             <div id="alert">⚠️ حرکت قابل توجهی در تصویر تشخیص داده شد</div>
             <div id="stage"><img id="live" style="display:none" alt="تصویر زنده کودک"></div>
             <div class="controls"><button id="night">🌙 حالت دید در شب: خاموش</button><button id="motion">🔔 هشدار حرکت: روشن</button></div>
-            <div class="controls"><button id="sound">🔊 هشدار صدای بلند: روشن</button><button id="talk">🎙️ صحبت با کودک</button></div>
+            <div class="controls"><button id="sound">🔊 هشدار صدای بلند: روشن</button><button id="listen">👂 شنیدن صدای محیط: خاموش</button></div>
+            <div class="controls"><button id="talk">🎙️ صحبت با کودک</button></div>
             <div id="hint">اتصال محلی امن · بدون نیاز به اینترنت</div>
             <script>
             const key='__KEY__',img=document.getElementById('live'),state=document.getElementById('state');
@@ -645,8 +646,11 @@ private class CameraHttpServer(
             if(soundOn&&s.soundLevel>0.72&&Date.now()-lastAlert>12000){lastAlert=Date.now();alertBox.textContent='🔊 صدای بلند در محیط کودک تشخیص داده شد';alertBox.style.display='block';}
             }catch(e){label(net,'قطع ارتباط','bad');label(camera,'نامشخص','bad');label(fresh,'دریافت نمی‌شود','bad');state.textContent='ارتباط با گوشی فرستنده قطع است؛ Wi-Fi و برنامه را بررسی کنید.';state.className='bad';img.style.display='none';ready=false;label(battery,'در دسترس نیست','bad');}}
             async function detectMotion(){if(!ready||!motionOn||!img.complete||!img.naturalWidth)return;try{const c=document.createElement('canvas'),w=48,h=36;c.width=w;c.height=h;const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(img,0,0,w,h);const data=x.getImageData(0,0,w,h).data;let diff=0;if(previous){for(let i=0;i<data.length;i+=4)diff+=Math.abs(data[i]-previous[i])+Math.abs(data[i+1]-previous[i+1])+Math.abs(data[i+2]-previous[i+2]);const ratio=diff/(w*h*3*255);if(ratio>0.13&&Date.now()-lastAlert>12000){lastAlert=Date.now();alertBox.textContent='⚠️ حرکت قابل توجهی در تصویر تشخیص داده شد';alertBox.style.display='block';if(navigator.vibrate)navigator.vibrate([180,80,180]);}}previous=data;}catch(e){}}
-            document.getElementById('talk').onclick=()=>{alert('مکالمه دوطرفه در مرحله بعدی با مجوز میکروفون فعال می‌شود.');};
-            check();setInterval(check,1500);setInterval(()=>{if(ready)img.src=url('/snapshot.jpg')},900);setInterval(detectMotion,1200);
+            let listening=false,talking=false,audioContext=null;
+            document.getElementById('listen').onclick=async()=>{listening=!listening;document.getElementById('listen').textContent='👂 شنیدن صدای محیط: '+(listening?'روشن':'خاموش');if(listening){try{audioContext=new (window.AudioContext||window.webkitAudioContext)({sampleRate:16000});await audioContext.resume();}catch(e){listening=false;alert('پخش صدا در این گوشی پشتیبانی نشد.');}}else if(audioContext){await audioContext.close();audioContext=null;}};
+            async function playAmbient(){if(!listening||!audioContext)return;try{const r=await fetch(url('/ambient'),{cache:'no-store'});if(!r.ok)return;const b=await r.arrayBuffer();if(!b.byteLength)return;const pcm=new Int16Array(b),buf=audioContext.createBuffer(1,pcm.length,16000),ch=buf.getChannelData(0);for(let i=0;i<pcm.length;i++)ch[i]=pcm[i]/32768;const src=audioContext.createBufferSource();src.buffer=buf;src.connect(audioContext.destination);src.start();}catch(e){}}
+            document.getElementById('talk').onclick=()=>{talking=!talking;document.getElementById('talk').textContent=talking?'⏹ توقف مکالمه':'🎙️ صحبت با کودک';if(talking){try{window.AndroidTalk.start(window.location.protocol+'//'+window.location.host,key);}catch(e){talking=false;alert('فعال‌سازی میکروفون ممکن نشد.');}}else{try{window.AndroidTalk.stop();}catch(e){}}};
+            check();setInterval(check,1500);setInterval(()=>{if(ready)img.src=url('/snapshot.jpg')},900);setInterval(detectMotion,1200);setInterval(playAmbient,120);
             </script></body></html>""".replace("__KEY__", pageToken)
             newFixedLengthResponse(Response.Status.OK, "text/html; charset=utf-8", html)
         }
