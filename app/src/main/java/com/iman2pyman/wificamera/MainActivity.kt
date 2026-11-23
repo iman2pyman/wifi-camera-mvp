@@ -42,7 +42,10 @@ import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.Collections
 import java.util.UUID
-import android.media.MediaRecorder
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.AudioTrack
+import android.media.AudioAttributes
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -59,8 +62,14 @@ class MainActivity : AppCompatActivity() {
     private var hotspotReservation: Any? = null
     private var fallbackHotspotMode = false
     @Volatile private var sessionToken: String = UUID.randomUUID().toString().replace("-", "")
-    private var soundRecorder: MediaRecorder? = null
+    private var ambientRecorder: AudioRecord? = null
+    private var ambientThread: Thread? = null
+    private var talkRecorder: AudioRecord? = null
+    private var talkThread: Thread? = null
+    private var talkTrack: AudioTrack? = null
+    @Volatile private var latestAudioPcm: ByteArray? = null
     @Volatile private var soundLevel: Double = 0.0
+    @Volatile private var pendingParentTalk: Pair<String, String>? = null
 
     private var scannedSsid: String? = null
     private var scannedPassword: String? = null
@@ -78,7 +87,11 @@ class MainActivity : AppCompatActivity() {
         if (granted) requestWifiPermissionAndStart() else toast("برای ارسال تصویر، اجازه دوربین لازم است.")
     }
     private val audioPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) startSoundMonitor() else toast("اجازه میکروفون داده نشد؛ هشدار صدای محیط غیرفعال است.")
+        if (granted) {
+            val pending = pendingParentTalk
+            if (pending != null) { pendingParentTalk = null; startParentTalk(pending.first, pending.second) }
+            else startSoundMonitor()
+        } else toast("اجازه میکروفون داده نشد؛ قابلیت‌های صوتی غیرفعال هستند.")
     }
     private val wifiPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) startSenderCamera() else toast("برای ایجاد شبکه محلی، اجازه دستگاه‌های نزدیک لازم است.")
@@ -299,27 +312,63 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startSoundMonitor() {
-        if (soundRecorder != null) return
+        if (ambientRecorder != null) return
         try {
-            val file = java.io.File(cacheDir, "ambient-monitor.3gp")
-            val recorder: MediaRecorder = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(this) else MediaRecorder()
-            recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
-            recorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP)
-            recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB)
-            recorder.setOutputFile(file.absolutePath)
-            recorder.prepare()
-            recorder.start()
-            soundRecorder = recorder
-            val handler = android.os.Handler(mainLooper)
-            val poll = object : Runnable {
-                override fun run() {
-                    val active = soundRecorder ?: return
-                    try { soundLevel = (active.maxAmplitude.toDouble() / 32767.0).coerceIn(0.0, 1.0) } catch (_: Exception) { soundLevel = 0.0 }
-                    handler.postDelayed(this, 700)
+            val rate = 16000
+            val min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+            val recorder = AudioRecord(android.media.MediaRecorder.AudioSource.MIC, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, 6400))
+            recorder.startRecording(); ambientRecorder = recorder
+            ambientThread = Thread {
+                val buffer = ByteArray(3200)
+                while (ambientRecorder === recorder && !Thread.currentThread().isInterrupted) {
+                    val n = recorder.read(buffer, 0, buffer.size)
+                    if (n > 0) {
+                        val chunk = buffer.copyOf(n); latestAudioPcm = chunk
+                        var sum = 0.0; var count = 0
+                        var i = 0; while (i + 1 < n) { val sample = ((chunk[i + 1].toInt() shl 8) or (chunk[i].toInt() and 255)).toShort().toInt(); sum += sample.toDouble() * sample.toDouble(); count++; i += 2 }
+                        soundLevel = if (count > 0) (kotlin.math.sqrt(sum / count) / 32767.0).coerceIn(0.0, 1.0) else 0.0
+                    }
                 }
-            }
-            handler.post(poll)
+            }.apply { isDaemon = true; start() }
         } catch (_: Exception) { soundLevel = 0.0; toast("پایش صدای محیط فعال نشد.") }
+    }
+
+    private fun startParentTalk(base: String, key: String) {
+        if (talkRecorder != null) return
+        try {
+            val rate = 16000
+            val min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
+            val recorder = AudioRecord(android.media.MediaRecorder.AudioSource.MIC, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, 6400))
+            recorder.startRecording(); talkRecorder = recorder
+            talkThread = Thread {
+                val buffer = ByteArray(3200)
+                while (talkRecorder === recorder && !Thread.currentThread().isInterrupted) {
+                    val n = recorder.read(buffer, 0, buffer.size)
+                    if (n > 0) try {
+                        val connection = java.net.URL("$base/talk?key=${Uri.encode(key)}").openConnection() as java.net.HttpURLConnection
+                        connection.requestMethod = "POST"; connection.doOutput = true; connection.connectTimeout = 2500; connection.readTimeout = 2500
+                        connection.setRequestProperty("Content-Type", "application/octet-stream")
+                        connection.outputStream.use { it.write(buffer, 0, n) }; connection.inputStream.close(); connection.disconnect()
+                    } catch (_: Exception) { }
+                }
+            }.apply { isDaemon = true; start() }
+        } catch (_: Exception) { toast("میکروفون گوشی والدین فعال نشد.") }
+    }
+
+    private fun stopParentTalk() {
+        val recorder = talkRecorder; talkRecorder = null
+        try { recorder?.stop() } catch (_: Exception) { }; try { recorder?.release() } catch (_: Exception) { }
+        talkThread?.interrupt(); talkThread = null
+    }
+
+    private fun playTalkAudio(bytes: ByteArray) {
+        try {
+            if (talkTrack == null) {
+                val min = AudioTrack.getMinBufferSize(16000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+                talkTrack = AudioTrack.Builder().setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()).setAudioFormat(AudioFormat.Builder().setSampleRate(16000).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build()).setBufferSizeInBytes(maxOf(min, 6400)).setTransferMode(AudioTrack.MODE_STREAM).build().apply { play() }
+            }
+            talkTrack?.write(bytes, 0, bytes.size)
+        } catch (_: Exception) { }
     }
 
     private fun currentBatteryPercent(): Int {
@@ -501,10 +550,12 @@ class MainActivity : AppCompatActivity() {
     private fun stopSender() {
         streaming.set(false)
         sessionToken = UUID.randomUUID().toString().replace("-", "")
-        try { soundRecorder?.stop() } catch (_: Exception) { }
-        try { soundRecorder?.release() } catch (_: Exception) { }
-        soundRecorder = null
-        soundLevel = 0.0
+        val ambient = ambientRecorder; ambientRecorder = null
+        try { ambient?.stop() } catch (_: Exception) { }; try { ambient?.release() } catch (_: Exception) { }
+        ambientThread?.interrupt(); ambientThread = null
+        stopParentTalk()
+        try { talkTrack?.stop() } catch (_: Exception) { }; try { talkTrack?.release() } catch (_: Exception) { }; talkTrack = null
+        latestAudioPcm = null; soundLevel = 0.0
         try { cameraServer?.stop() } catch (_: Exception) { }
         cameraServer = null
         if (Build.VERSION.SDK_INT >= 26) {
