@@ -60,6 +60,7 @@ import android.media.AudioFocusRequest
 import java.util.concurrent.Executors
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.LinkedBlockingDeque
 
 class MainActivity : AppCompatActivity() {
     private lateinit var root: LinearLayout
@@ -67,6 +68,7 @@ class MainActivity : AppCompatActivity() {
     private val executor = Executors.newSingleThreadExecutor()
     @Volatile private var latestJpeg: ByteArray? = null
     @Volatile private var latestFrameAt: Long = 0L
+    private val ambientPackets = LinkedBlockingDeque<Pair<Long, ByteArray>>(40)
     private var senderNetworkStatus: TextView? = null
     private var hotspotReservation: Any? = null
     private var fallbackHotspotMode = false
@@ -329,39 +331,21 @@ class MainActivity : AppCompatActivity() {
         root.addView(button("⏹  توقف ارسال و بازگشت") { stopSender(); showHome() })
         setContentView(scroll)
 
-        val future = ProcessCameraProvider.getInstance(this)
-        future.addListener({
-            try {
-                val provider = future.get()
-                val previewUseCase = androidx.camera.core.Preview.Builder().build()
-                val analysisUseCase = ImageAnalysis.Builder()
-                    .setTargetResolution(Size(640, 480))
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .build()
-                previewUseCase.setSurfaceProvider(preview.surfaceProvider)
-                analysisUseCase.setAnalyzer(executor) { frame ->
-                    try {
-                        val jpeg = imageProxyToJpeg(frame)
-                        if (jpeg.isNotEmpty()) {
-                            latestJpeg = jpeg
-                            latestFrameAt = android.os.SystemClock.elapsedRealtime()
-                            runOnUiThread { senderNetworkStatus?.text = "تصویر زنده آماده است؛ منتظر اتصال گوشی والدین…" }
-                        }
-                    } catch (e: Exception) {
-                        runOnUiThread { senderNetworkStatus?.text = "خطای پردازش تصویر: ${e.message}" }
-                    } finally {
-                        frame.close()
-                    }
-                }
-                provider.unbindAll()
-                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, previewUseCase, analysisUseCase)
-                if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startSoundMonitor() else audioPermission.launch(Manifest.permission.RECORD_AUDIO)
-                if (Build.VERSION.SDK_INT >= 26) startLocalOnlyHotspot(status)
-                else showManualHotspotFallback(status)
-            } catch (e: Exception) {
-                toast("راه‌اندازی دوربین ناموفق بود: ${e.message}")
-            }
-        }, ContextCompat.getMainExecutor(this))
+        try {
+            val cameraIntent = Intent(this, SenderCameraService::class.java)
+            if (Build.VERSION.SDK_INT >= 26) ContextCompat.startForegroundService(this, cameraIntent)
+            else startService(cameraIntent)
+            senderNetworkStatus?.text = "سرویس دوربین در پس‌زمینه در حال راه‌اندازی است…"
+        } catch (e: Exception) {
+            toast("راه‌اندازی سرویس دوربین ناموفق بود: ${e.message}")
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            startSoundMonitor()
+        } else {
+            audioPermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+        if (Build.VERSION.SDK_INT >= 26) startLocalOnlyHotspot(status)
+        else showManualHotspotFallback(status)
     }
 
     @RequiresApi(26)
@@ -480,6 +464,7 @@ class MainActivity : AppCompatActivity() {
                     val n = recorder.read(buffer, 0, buffer.size)
                     if (n > 0) {
                         val chunk = buffer.copyOf(n); val sequence = audioSequence.incrementAndGet(); latestAudioPacket = sequence to chunk
+                        if (!ambientPackets.offerLast(sequence to chunk)) { ambientPackets.pollFirst(); ambientPackets.offerLast(sequence to chunk) }
                         var sum = 0.0; var count = 0
                         var i = 0; while (i + 1 < n) { val sample = ((chunk[i + 1].toInt() shl 8) or (chunk[i].toInt() and 255)).toShort().toInt(); sum += sample.toDouble() * sample.toDouble(); count++; i += 2 }
                         soundLevel = if (count > 0) (kotlin.math.sqrt(sum / count) / 32767.0).coerceIn(0.0, 1.0) else 0.0
@@ -578,7 +563,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startHttpServer() {
         if (cameraServer != null) return
-        val server = CameraHttpServer(8080, { latestJpeg }, { latestFrameAt }, { currentBatteryPercent() }, { sessionToken }, { soundLevel }, { latestAudioPacket }, { bytes -> playTalkAudio(bytes) })
+        val server = CameraHttpServer(8080, { SenderCameraRuntime.latestJpeg }, { SenderCameraRuntime.latestFrameAt }, { currentBatteryPercent() }, { sessionToken }, { soundLevel }, { ambientPackets.pollFirst() }, { bytes -> playTalkAudio(bytes) })
         server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
         cameraServer = server
     }
@@ -813,7 +798,10 @@ class MainActivity : AppCompatActivity() {
             try { (hotspotReservation as? WifiManager.LocalOnlyHotspotReservation)?.close() } catch (_: Exception) { }
         }
         hotspotReservation = null
-        try { ProcessCameraProvider.getInstance(this).get().unbindAll() } catch (_: Exception) { }
+        try { stopService(Intent(this, SenderCameraService::class.java)) } catch (_: Exception) { }
+        SenderCameraRuntime.latestJpeg = null
+        SenderCameraRuntime.latestFrameAt = 0L
+        ambientPackets.clear()
         latestJpeg = null
         latestFrameAt = 0L
         senderNetworkStatus = null
@@ -823,7 +811,7 @@ class MainActivity : AppCompatActivity() {
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()
 
     override fun onDestroy() {
-        stopSender()
+        // The sender foreground service deliberately outlives this Activity when the screen is locked.
         executor.shutdown()
         super.onDestroy()
     }
