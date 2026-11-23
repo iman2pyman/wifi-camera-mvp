@@ -295,7 +295,7 @@ class MainActivity : AppCompatActivity() {
                 startHttpServer()
                 val ip = localIpAddress()
                 status.text = if (ip == null) "سرور روشن شد اما IP پیدا نشد. مطمئن شو هات‌اسپات فعال است."
-                    else "گوشی دوم را به هات‌اسپات وصل کن و این نشانی را وارد کن:\nhttp://$ip:8080"
+                    else "گوشی دوم را به هات‌اسپات وصل کن و این نشانی امن را وارد کن:\nhttp://$ip:8080?key=$sessionToken"
             } catch (e: Exception) {
                 toast("راه‌اندازی سرور ناموفق بود: ${e.message}")
             }
@@ -628,9 +628,9 @@ private class CameraHttpServer(
             <div id="alert">⚠️ حرکت قابل توجهی در تصویر تشخیص داده شد</div>
             <div id="stage"><img id="live" style="display:none" alt="تصویر زنده کودک"></div>
             <div class="controls"><button id="night">🌙 حالت دید در شب: خاموش</button><button id="motion">🔔 هشدار حرکت: روشن</button></div>
-            <div class="controls"><button id="sound">🔊 هشدار صدای بلند: روشن</button><button id="listen">👂 شنیدن صدای محیط: خاموش</button></div>
+            <div class="controls"><button id="sound">🔊 هشدار صدای بلند / احتمال گریه: روشن</button><button id="listen">👂 شنیدن صدای محیط: خاموش</button></div>
             <div class="controls"><button id="talk">🎙️ صحبت با کودک</button></div>
-            <div id="hint">اتصال محلی امن · بدون نیاز به اینترنت</div>
+            <div id="hint">تشخیص حرکت تصویری و صدای بلند به‌صورت محلی انجام می‌شود؛ این هشدار تشخیص پزشکی یا قطعی گریه نیست.<br>اتصال محلی امن · بدون نیاز به اینترنت</div>
             <script>
             const key='__KEY__',img=document.getElementById('live'),state=document.getElementById('state');
             const net=document.getElementById('net'),battery=document.getElementById('battery'),camera=document.getElementById('camera'),fresh=document.getElementById('fresh'),alertBox=document.getElementById('alert');
@@ -639,7 +639,7 @@ private class CameraHttpServer(
             function url(path){return path+'?key='+encodeURIComponent(key)+'&t='+Date.now()}
             document.getElementById('night').onclick=()=>{night=!night;img.style.filter=night?'grayscale(1) brightness(1.65) contrast(1.15)':'none';document.getElementById('night').textContent='🌙 حالت دید در شب: '+(night?'روشن':'خاموش')};
             document.getElementById('motion').onclick=()=>{motionOn=!motionOn;document.getElementById('motion').textContent='🔔 هشدار حرکت: '+(motionOn?'روشن':'خاموش')};
-            document.getElementById('sound').onclick=()=>{soundOn=!soundOn;document.getElementById('sound').textContent='🔊 هشدار صدای بلند: '+(soundOn?'روشن':'خاموش')};
+            document.getElementById('sound').onclick=()=>{soundOn=!soundOn;document.getElementById('sound').textContent='🔊 هشدار صدای بلند / احتمال گریه: '+(soundOn?'روشن':'خاموش')};
             async function check(){try{const r=await fetch(url('/status'),{cache:'no-store'});if(!r.ok)throw Error('server');const s=await r.json();label(net,'متصل','ok');label(battery,s.batteryPercent>=0?s.batteryPercent+'٪':'نامشخص',s.batteryPercent>=20?'ok':'warn');
             if(s.cameraReady){label(camera,'فعال','ok');const age=s.frameAgeMs||0;label(fresh,age<1500?'روان':age<3000?'قابل قبول':'با تأخیر',age<3000?'ok':'warn');state.textContent='تصویر زنده در حال دریافت است';state.className='ok';img.style.display='block';if(!ready){img.src=url('/snapshot.jpg');ready=true;}}
             else{label(camera,'آماده نیست','warn');label(fresh,'بدون تصویر','warn');state.textContent=s.message||'منتظر آماده‌شدن دوربین…';state.className='warn';img.style.display='none';ready=false;}
