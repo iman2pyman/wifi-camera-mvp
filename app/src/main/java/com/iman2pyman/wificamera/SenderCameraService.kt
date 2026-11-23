@@ -48,7 +48,7 @@ class SenderCameraService : LifecycleService() {
         try {
             if (Build.VERSION.SDK_INT >= 29) {
                 var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
-                if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                if (Build.VERSION.SDK_INT >= 30 && ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                     types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
                 }
                 startForeground(NOTIFICATION_ID, notification, types)
@@ -126,7 +126,7 @@ class SenderCameraService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         if (intent?.getBooleanExtra("enable_audio", false) == true &&
-            Build.VERSION.SDK_INT >= 29 &&
+            Build.VERSION.SDK_INT >= 30 &&
             ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
             try {
                 val notification = NotificationCompat.Builder(this, CHANNEL_ID)
