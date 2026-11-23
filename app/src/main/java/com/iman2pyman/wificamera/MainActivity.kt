@@ -604,7 +604,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startHttpServer() {
         if (cameraServer != null) return
-        val server = CameraHttpServer(8080, { SenderCameraRuntime.latestJpeg }, { SenderCameraRuntime.latestFrameAt }, { currentBatteryPercent() }, { sessionToken }, { soundLevel }, { ambientPackets.pollFirst() }, { bytes -> playTalkAudio(bytes) })
+        val server = CameraHttpServer(8080, { SenderCameraRuntime.latestJpeg }, { SenderCameraRuntime.latestFrameAt }, { currentBatteryPercent() }, { sessionToken }, { soundLevel }, { ambientRecorder?.recordingState == AudioRecord.RECORDSTATE_RECORDING }, { ambientPackets.pollFirst() }, { bytes -> playTalkAudio(bytes) })
         server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
         cameraServer = server
     }
@@ -865,6 +865,7 @@ private class CameraHttpServer(
     private val batteryProvider: () -> Int,
     private val tokenProvider: () -> String,
     private val soundLevelProvider: () -> Double,
+    private val audioReadyProvider: () -> Boolean,
     private val audioPacketProvider: () -> Pair<Long, ByteArray>?,
     private val talkSink: (ByteArray) -> Unit
 ) : NanoHTTPD(port) {
@@ -928,7 +929,7 @@ private class CameraHttpServer(
             val message = if (ready) "تصویر زنده برقرار است" else if (frameAt == 0L) "شبکه و سرور وصل‌اند؛ هنوز اولین تصویر دوربین دریافت نشده است." else "گوشی وصل است، اما ارسال تصویر متوقف یا کند شده است."
             val battery = batteryProvider()
             val sound = soundLevelProvider()
-            val audioReady = ambientRecorder?.recordingState == AudioRecord.RECORDSTATE_RECORDING
+            val audioReady = audioReadyProvider()
             val json = """{"server":"online","cameraReady":$ready,"frameAgeMs":${if (age == Long.MAX_VALUE) -1 else age},"batteryPercent":$battery,"soundLevel":$sound,"audioReady":$audioReady,"message":"$message"}"""
             newFixedLengthResponse(Response.Status.OK, "application/json; charset=utf-8", json)
         }
