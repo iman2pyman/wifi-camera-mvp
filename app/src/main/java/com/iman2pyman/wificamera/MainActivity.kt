@@ -4,6 +4,12 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.ImageFormat
+import android.graphics.Rect
+import android.graphics.YuvImage
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.util.Size
 import android.graphics.drawable.GradientDrawable
 import android.widget.ScrollView
 import android.net.wifi.WifiManager
@@ -31,8 +37,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageCapture
-import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
@@ -52,19 +58,16 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.AudioFocusRequest
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicLong
 
 class MainActivity : AppCompatActivity() {
     private lateinit var root: LinearLayout
     private var cameraServer: CameraHttpServer? = null
-    private var imageCapture: ImageCapture? = null
     private val executor = Executors.newSingleThreadExecutor()
-    private val streaming = AtomicBoolean(false)
     @Volatile private var latestJpeg: ByteArray? = null
     @Volatile private var latestFrameAt: Long = 0L
     private var senderNetworkStatus: TextView? = null
-    @Volatile private var captureBusy = false
     private var hotspotReservation: Any? = null
     private var fallbackHotspotMode = false
     @Volatile private var sessionToken: String = UUID.randomUUID().toString().replace("-", "")
@@ -331,13 +334,27 @@ class MainActivity : AppCompatActivity() {
             try {
                 val provider = future.get()
                 val previewUseCase = androidx.camera.core.Preview.Builder().build()
-                val captureUseCase = ImageCapture.Builder()
-                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).setJpegQuality(70).build()
-                imageCapture = captureUseCase
+                val analysisUseCase = ImageAnalysis.Builder()
+                    .setTargetResolution(Size(640, 480))
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .build()
                 previewUseCase.setSurfaceProvider(preview.surfaceProvider)
+                analysisUseCase.setAnalyzer(executor) { frame ->
+                    try {
+                        val jpeg = imageProxyToJpeg(frame)
+                        if (jpeg.isNotEmpty()) {
+                            latestJpeg = jpeg
+                            latestFrameAt = android.os.SystemClock.elapsedRealtime()
+                            runOnUiThread { senderNetworkStatus?.text = "تصویر زنده آماده است؛ منتظر اتصال گوشی والدین…" }
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread { senderNetworkStatus?.text = "خطای پردازش تصویر: ${e.message}" }
+                    } finally {
+                        frame.close()
+                    }
+                }
                 provider.unbindAll()
-                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, previewUseCase, captureUseCase)
-                startCaptureLoop()
+                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, previewUseCase, analysisUseCase)
                 if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startSoundMonitor() else audioPermission.launch(Manifest.permission.RECORD_AUDIO)
                 if (Build.VERSION.SDK_INT >= 26) startLocalOnlyHotspot(status)
                 else showManualHotspotFallback(status)
@@ -566,46 +583,44 @@ class MainActivity : AppCompatActivity() {
         cameraServer = server
     }
 
-    private fun startCaptureLoop() {
-        streaming.set(true)
-        val handler = android.os.Handler(mainLooper)
-        val task = object : Runnable {
-            override fun run() {
-                if (!streaming.get()) return
-                val capture = imageCapture
-                if (capture != null && !captureBusy) {
-                    captureBusy = true
-                    // Save through CameraX's JPEG encoder. Copying plane[0] from
-                    // an ImageProxy is not a valid JPEG on devices that return YUV.
-                    val frameFile = java.io.File(cacheDir, "baby-monitor-frame.jpg")
-                    val outputOptions = ImageCapture.OutputFileOptions.Builder(frameFile).build()
-                    capture.takePicture(outputOptions, executor, object : ImageCapture.OnImageSavedCallback {
-                        override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                            try {
-                                val bytes = frameFile.readBytes()
-                                if (bytes.isNotEmpty()) {
-                                    latestJpeg = bytes
-                                    latestFrameAt = android.os.SystemClock.elapsedRealtime()
-                                    runOnUiThread { senderNetworkStatus?.text = "دوربین آماده است؛ منتظر اتصال گوشی والدین…" }
-                                }
-                            } catch (_: Exception) {
-                            } finally {
-                                captureBusy = false
-                            }
-                        }
-                        override fun onError(exception: ImageCaptureException) {
-                            captureBusy = false
-                            runOnUiThread {
-                                senderNetworkStatus?.text = "خطای دریافت تصویر دوربین: ${exception.message}"
-                                toast("خطای دریافت تصویر دوربین: ${exception.message}")
-                            }
-                        }
-                    })
-                }
-                handler.postDelayed(this, 300)
+    private fun imageProxyToJpeg(image: ImageProxy): ByteArray {
+        val width = image.width
+        val height = image.height
+        val planes = image.planes
+        val yPlane = planes[0]
+        val uPlane = planes[1]
+        val vPlane = planes[2]
+        val yBuffer = yPlane.buffer
+        val uBuffer = uPlane.buffer
+        val vBuffer = vPlane.buffer
+        val nv21 = ByteArray(width * height * 3 / 2)
+        var out = 0
+        for (row in 0 until height) {
+            val rowStart = row * yPlane.rowStride
+            for (col in 0 until width) nv21[out++] = yBuffer.get(rowStart + col * yPlane.pixelStride)
+        }
+        for (row in 0 until height / 2) {
+            val uRow = row * uPlane.rowStride
+            val vRow = row * vPlane.rowStride
+            for (col in 0 until width / 2) {
+                nv21[out++] = vBuffer.get(vRow + col * vPlane.pixelStride)
+                nv21[out++] = uBuffer.get(uRow + col * uPlane.pixelStride)
             }
         }
-        handler.post(task)
+        val encoded = ByteArrayOutputStream()
+        YuvImage(nv21, ImageFormat.NV21, width, height, null)
+            .compressToJpeg(Rect(0, 0, width, height), 65, encoded)
+        val jpeg = encoded.toByteArray()
+        val rotation = image.imageInfo.rotationDegrees
+        if (rotation == 0 || jpeg.isEmpty()) return jpeg
+        val bitmap = BitmapFactory.decodeByteArray(jpeg, 0, jpeg.size) ?: return jpeg
+        val matrix = Matrix().apply { postRotate(rotation.toFloat()) }
+        val rotated = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+        val result = ByteArrayOutputStream()
+        rotated.compress(Bitmap.CompressFormat.JPEG, 65, result)
+        if (rotated !== bitmap) rotated.recycle()
+        bitmap.recycle()
+        return result.toByteArray()
     }
 
     private fun showViewer() {
@@ -776,7 +791,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopSender() {
-        streaming.set(false)
         sessionToken = UUID.randomUUID().toString().replace("-", "")
         val ambient = ambientRecorder; ambientRecorder = null
         try { ambient?.stop() } catch (_: Exception) { }; try { ambient?.release() } catch (_: Exception) { }
@@ -800,7 +814,6 @@ class MainActivity : AppCompatActivity() {
         }
         hotspotReservation = null
         try { ProcessCameraProvider.getInstance(this).get().unbindAll() } catch (_: Exception) { }
-        imageCapture = null
         latestJpeg = null
         latestFrameAt = 0L
         senderNetworkStatus = null
