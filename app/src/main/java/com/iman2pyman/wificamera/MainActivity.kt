@@ -662,7 +662,14 @@ class MainActivity : AppCompatActivity() {
             }
             networkCard.addView(text("🛜  شبکه شناسایی شد", 16f))
             networkCard.addView(text("نام شبکه: $scannedSsid", 14f))
-            if (!scannedPassword.isNullOrBlank()) networkCard.addView(text("رمز شبکه: $scannedPassword", 14f))
+            if (!scannedPassword.isNullOrBlank()) {
+                networkCard.addView(text("رمز شبکه: $scannedPassword", 14f))
+                networkCard.addView(button("📋  کپی رمز شبکه") {
+                    val clipboard = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                    clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Wi-Fi password", scannedPassword))
+                    toast("رمز شبکه کپی شد.")
+                })
+            }
             networkCard.addView(text("ابتدا به شبکه بالا متصل شو و سپس به همین برنامه برگرد.", 12f))
             root.addView(networkCard, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8); bottomMargin = dp(8) })
         }
@@ -854,23 +861,23 @@ private class CameraHttpServer(
             <script>
             const key='__KEY__',img=document.getElementById('live'),state=document.getElementById('state');
             const net=document.getElementById('net'),battery=document.getElementById('battery'),camera=document.getElementById('camera'),fresh=document.getElementById('fresh'),alertBox=document.getElementById('alert');
-            let ready=false,night=false,motionOn=true,soundOn=true,previous=null,lastAlert=0;
+            let ready=false,night=false,motionOn=true,soundOn=true,previous=null,lastAlert=0,audioSeq=0,nextAudioTime=0;
             function label(el,value,kind){el.textContent=value;el.className='value '+kind}
             function url(path){return path+'?key='+encodeURIComponent(key)+'&t='+Date.now()}
             document.getElementById('night').onclick=()=>{night=!night;img.style.filter=night?'grayscale(1) brightness(1.65) contrast(1.15)':'none';document.getElementById('night').textContent='🌙 حالت دید در شب: '+(night?'روشن':'خاموش')};
             document.getElementById('motion').onclick=()=>{motionOn=!motionOn;document.getElementById('motion').textContent='🔔 هشدار حرکت: '+(motionOn?'روشن':'خاموش')};
             document.getElementById('sound').onclick=()=>{soundOn=!soundOn;document.getElementById('sound').textContent='🔊 هشدار صدای بلند / احتمال گریه: '+(soundOn?'روشن':'خاموش')};
             async function check(){try{const r=await fetch(url('/status'),{cache:'no-store'});if(!r.ok)throw Error('server');const s=await r.json();label(net,'متصل','ok');label(battery,s.batteryPercent>=0?s.batteryPercent+'٪':'نامشخص',s.batteryPercent>=20?'ok':'warn');
-            if(s.cameraReady){label(camera,'فعال','ok');const age=s.frameAgeMs||0;label(fresh,age<1500?'روان':age<3000?'قابل قبول':'با تأخیر',age<3000?'ok':'warn');state.textContent='تصویر زنده در حال دریافت است';state.className='ok';img.style.display='block';if(!ready){img.src=url('/snapshot.jpg');ready=true;}}
+            if(s.cameraReady){label(camera,'فعال','ok');const age=s.frameAgeMs||0;label(fresh,age<1500?'روان':age<3000?'قابل قبول':'با تأخیر',age<3000?'ok':'warn');state.textContent='تصویر زنده در حال دریافت است';state.className='ok';img.style.display='block';if(!ready){img.src=url('/stream');ready=true;}}
             else{label(camera,'آماده نیست','warn');label(fresh,'بدون تصویر','warn');state.textContent=s.message||'منتظر آماده‌شدن دوربین…';state.className='warn';img.style.display='none';ready=false;}
             if(soundOn&&s.soundLevel>0.72&&Date.now()-lastAlert>12000){lastAlert=Date.now();alertBox.textContent='🔊 صدای بلند در محیط کودک تشخیص داده شد';alertBox.style.display='block';}
             }catch(e){label(net,'قطع ارتباط','bad');label(camera,'نامشخص','bad');label(fresh,'دریافت نمی‌شود','bad');state.textContent='ارتباط با گوشی فرستنده قطع است؛ Wi-Fi و برنامه را بررسی کنید.';state.className='bad';img.style.display='none';ready=false;label(battery,'در دسترس نیست','bad');}}
             async function detectMotion(){if(!ready||!motionOn||!img.complete||!img.naturalWidth)return;try{const c=document.createElement('canvas'),w=48,h=36;c.width=w;c.height=h;const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(img,0,0,w,h);const data=x.getImageData(0,0,w,h).data;let diff=0;if(previous){for(let i=0;i<data.length;i+=4)diff+=Math.abs(data[i]-previous[i])+Math.abs(data[i+1]-previous[i+1])+Math.abs(data[i+2]-previous[i+2]);const ratio=diff/(w*h*3*255);if(ratio>0.13&&Date.now()-lastAlert>12000){lastAlert=Date.now();alertBox.textContent='⚠️ حرکت قابل توجهی در تصویر تشخیص داده شد';alertBox.style.display='block';if(navigator.vibrate)navigator.vibrate([180,80,180]);}}previous=data;}catch(e){}}
-            let listening=false,talking=false,audioContext=null;
+            let listening=false,talking=false,audioContext=null,ambientLoopRunning=false;
             document.getElementById('listen').onclick=async()=>{listening=!listening;document.getElementById('listen').textContent='👂 شنیدن صدای محیط: '+(listening?'روشن':'خاموش');if(listening){try{audioContext=new (window.AudioContext||window.webkitAudioContext)({sampleRate:16000});await audioContext.resume();}catch(e){listening=false;alert('پخش صدا در این گوشی پشتیبانی نشد.');}}else if(audioContext){await audioContext.close();audioContext=null;}};
-            async function playAmbient(){if(!listening||!audioContext)return;try{const r=await fetch(url('/ambient'),{cache:'no-store'});if(!r.ok)return;const b=await r.arrayBuffer();if(!b.byteLength)return;const pcm=new Int16Array(b),buf=audioContext.createBuffer(1,pcm.length,16000),ch=buf.getChannelData(0);for(let i=0;i<pcm.length;i++)ch[i]=pcm[i]/32768;const src=audioContext.createBufferSource();src.buffer=buf;src.connect(audioContext.destination);src.start();}catch(e){}}
+            async function playAmbient(){if(ambientLoopRunning)return;ambientLoopRunning=true;while(listening&&audioContext){try{const r=await fetch(url('/ambient')+'&since='+audioSeq,{cache:'no-store'});if(r.status===204)continue;if(!r.ok)throw Error('audio');const seq=Number(r.headers.get('X-Audio-Sequence')||audioSeq);if(seq<=audioSeq)continue;audioSeq=seq;const b=await r.arrayBuffer();if(!b.byteLength)continue;const pcm=new Int16Array(b),buf=audioContext.createBuffer(1,pcm.length,16000),ch=buf.getChannelData(0);for(let i=0;i<pcm.length;i++)ch[i]=pcm[i]/32768;const src=audioContext.createBufferSource();src.buffer=buf;src.connect(audioContext.destination);const now=audioContext.currentTime;nextAudioTime=Math.max(nextAudioTime,now+0.025);src.start(nextAudioTime);nextAudioTime+=buf.duration;}catch(e){await new Promise(resolve=>setTimeout(resolve,250));}}ambientLoopRunning=false;}
             document.getElementById('talk').onclick=()=>{talking=!talking;document.getElementById('talk').textContent=talking?'⏹ توقف مکالمه':'🎙️ صحبت با کودک';if(talking){try{window.AndroidTalk.start(window.location.protocol+'//'+window.location.host,key);}catch(e){talking=false;alert('فعال‌سازی میکروفون ممکن نشد.');}}else{try{window.AndroidTalk.stop();}catch(e){}}};
-            check();setInterval(check,1500);setInterval(()=>{if(ready)img.src=url('/snapshot.jpg')},900);setInterval(detectMotion,1200);setInterval(playAmbient,120);
+            img.onerror=()=>{if(ready)setTimeout(()=>{if(ready)img.src=url('/stream')},900)};check();setInterval(check,1500);setInterval(detectMotion,1200);
             </script></body></html>""".replace("__KEY__", pageToken)
             newFixedLengthResponse(Response.Status.OK, "text/html; charset=utf-8", html)
         }
