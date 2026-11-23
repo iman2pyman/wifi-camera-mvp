@@ -527,7 +527,7 @@ private class CameraHttpServer(
                 label(net,'متصل','ok');
                 label(battery,s.batteryPercent>=0?s.batteryPercent+'٪':'نامشخص',s.batteryPercent>=20?'ok':'warn');
                 if(s.cameraReady){
-                  label(camera,'فعال','ok');label(fresh,'تازه','ok');
+                  label(camera,'فعال','ok');const age=s.frameAgeMs||0;label(fresh,age<1500?'روان':age<3000?'قابل قبول':'با تأخیر',age<3000?'ok':'warn');
                   state.textContent='تصویر زنده در حال دریافت است';state.className='ok';
                   img.style.display='block';
                   if(!ready){img.src='/snapshot.jpg?t='+Date.now();ready=true;}
