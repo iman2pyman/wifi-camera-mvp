@@ -559,50 +559,33 @@ class MainActivity : AppCompatActivity() {
         talkThread?.interrupt(); talkThread = null
     }
 
-    @Suppress("DEPRECATION")
+    @Synchronized
     private fun playTalkAudio(bytes: ByteArray) {
         try {
             if (talkTrack == null) {
-                val manager = getSystemService(AUDIO_SERVICE) as AudioManager
-                talkAudioManager = manager
-                previousAudioMode = manager.mode
-                previousSpeakerphone = manager.isSpeakerphoneOn
-                manager.mode = AudioManager.MODE_IN_COMMUNICATION
-                manager.isSpeakerphoneOn = true
-                if (Build.VERSION.SDK_INT >= 31) {
-                    val speaker = manager.availableCommunicationDevices.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-                    if (speaker != null) manager.setCommunicationDevice(speaker)
+                val rate = 16000
+                val min = AudioTrack.getMinBufferSize(rate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+                if (min <= 0) throw IllegalStateException("قالب پخش صدا پشتیبانی نمی‌شود")
+                val track = AudioTrack(AudioManager.STREAM_MUSIC, rate, AudioFormat.CHANNEL_OUT_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT, maxOf(min * 3, 24000), AudioTrack.MODE_STREAM)
+                if (track.state != AudioTrack.STATE_INITIALIZED) {
+                    track.release()
+                    throw IllegalStateException("بلندگوی گوشی آماده پخش نیست")
                 }
-                val attributes = AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
-                if (Build.VERSION.SDK_INT >= 26) {
-                    val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
-                        .setAudioAttributes(attributes).setAcceptsDelayedFocusGain(false).build()
-                    talkFocusRequest = focus
-                    manager.requestAudioFocus(focus)
-                } else {
-                    manager.requestAudioFocus(null, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
-                }
-                val min = AudioTrack.getMinBufferSize(16000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
-                talkTrack = AudioTrack.Builder().setAudioAttributes(attributes)
-                    .setAudioFormat(AudioFormat.Builder().setSampleRate(16000).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-                    .setBufferSizeInBytes(maxOf(min * 2, 12800)).setTransferMode(AudioTrack.MODE_STREAM).build().apply {
-                        if (Build.VERSION.SDK_INT >= 23) {
-                            val speaker = manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-                            if (speaker != null) setPreferredDevice(speaker)
-                        }
-                        play()
-                    }
+                track.setStereoVolume(1.0f, 1.0f)
+                track.play()
+                talkTrack = track
             }
             val track = talkTrack ?: return
             var offset = 0
             while (offset < bytes.size) {
-                val written = track.write(bytes, offset, bytes.size - offset)
+                val written = track.write(bytes, offset, bytes.size - offset, AudioTrack.WRITE_BLOCKING)
                 if (written <= 0) break
                 offset += written
             }
-        } catch (_: Exception) { }
+        } catch (e: Exception) {
+            SenderCameraRuntime.lastError = "پخش صدای والد روی گوشی کودک ناموفق بود: ${e.message}"
+        }
     }
 
     private fun currentBatteryPercent(): Int {
