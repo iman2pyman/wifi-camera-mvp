@@ -313,7 +313,11 @@ class MainActivity : AppCompatActivity() {
                         override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                             try {
                                 val bytes = frameFile.readBytes()
-                                if (bytes.isNotEmpty()) { latestJpeg = bytes; latestFrameAt = android.os.SystemClock.elapsedRealtime() }
+                                if (bytes.isNotEmpty()) {
+                                    latestJpeg = bytes
+                                    latestFrameAt = android.os.SystemClock.elapsedRealtime()
+                                    runOnUiThread { senderNetworkStatus?.text = "دوربین آماده است؛ منتظر اتصال گوشی والدین…" }
+                                }
                             } catch (_: Exception) {
                             } finally {
                                 captureBusy = false
@@ -321,7 +325,10 @@ class MainActivity : AppCompatActivity() {
                         }
                         override fun onError(exception: ImageCaptureException) {
                             captureBusy = false
-                            runOnUiThread { toast("خطای دریافت تصویر دوربین: ${exception.message}") }
+                            runOnUiThread {
+                                senderNetworkStatus?.text = "خطای دریافت تصویر دوربین: ${exception.message}"
+                                toast("خطای دریافت تصویر دوربین: ${exception.message}")
+                            }
                         }
                     })
                 }
@@ -408,7 +415,8 @@ class MainActivity : AppCompatActivity() {
         root.addView(text("تصویر زنده کودک", 22f))
         root.addView(text(if (bound) "اتصال از مسیر Wi-Fi برقرار می‌شود." else "شبکه Wi-Fi پیدا نشد؛ مطمئن شو گوشی گیرنده به شبکه فرستنده وصل است.", 13f))
         val web = WebView(this).apply {
-            settings.javaScriptEnabled = false
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
             webViewClient = object : WebViewClient() {
                 override fun onReceivedError(view: WebView, request: android.webkit.WebResourceRequest, error: android.webkit.WebResourceError) {
                     if (request.isForMainFrame) runOnUiThread {
@@ -476,7 +484,7 @@ private class CameraHttpServer(port: Int, private val frameProvider: () -> ByteA
             val age = if (frameAt == 0L) Long.MAX_VALUE else android.os.SystemClock.elapsedRealtime() - frameAt
             val ready = frameProvider() != null && age < 5000L
             val message = if (ready) "تصویر زنده برقرار است" else if (frameAt == 0L) "شبکه و سرور وصل‌اند؛ هنوز اولین تصویر دوربین دریافت نشده است." else "گوشی وصل است، اما ارسال تصویر متوقف یا کند شده است."
-            val json = """{"server":"online","cameraReady":$ready,"frameAgeMs":\${if (age == Long.MAX_VALUE) -1 else age},"message":"$message"}"""
+            val json = """{"server":"online","cameraReady":$ready,"frameAgeMs":${if (age == Long.MAX_VALUE) -1 else age},"message":"$message"}"""
             newFixedLengthResponse(Response.Status.OK, "application/json; charset=utf-8", json)
         }
         "/snapshot.jpg" -> {
