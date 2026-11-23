@@ -276,7 +276,7 @@ class MainActivity : AppCompatActivity() {
     private fun showAboutDialog() {
         android.app.AlertDialog.Builder(this)
             .setTitle("درباره دوربین کنترل کودک")
-            .setMessage("نام برنامه: دوربین کنترل کودک\nنام انگلیسی: Baby Monitor Camera\n\nاین برنامه برای مشاهده تصویر کودک از طریق اتصال محلی دو گوشی طراحی شده است.\n\nنام سازنده در نسخه نهایی درج خواهد شد.")
+            .setMessage("نام برنامه: دوربین کنترل کودک\nنام انگلیسی: Baby Monitor Camera\n\nاین برنامه برای مشاهده تصویر کودک از طریق اتصال محلی دو گوشی طراحی شده است.\n\nسازنده: ایمان محمدپور")
             .setPositiveButton("بستن", null)
             .show()
     }
@@ -284,16 +284,39 @@ class MainActivity : AppCompatActivity() {
     private fun startSenderCamera() {
         stopSender()
         root = baseLayout()
-        root.addView(text("📷 ارسال زنده تصویر کوچولو", 22f))
+        root.gravity = Gravity.TOP
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(root, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        val intro = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            background = rounded(Color.WHITE, 24, Color.rgb(220, 237, 249))
+            elevation = dp(4).toFloat()
+        }
+        intro.addView(text("🧸", 38f))
+        intro.addView(text("گوشی مراقب کوچولو", 21f))
+        intro.addView(text("این گوشی را نزدیک کودک قرار بده؛ تصویر از طریق شبکه محلی به گوشی والدین فرستاده می‌شود.", 13f))
+        root.addView(intro, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(14) })
         val preview = PreviewView(this).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+            background = rounded(Color.rgb(29, 48, 67), 24)
         }
-        root.addView(preview, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 230))
-        val status = text("در حال آماده‌سازی دوربین…")
+        root.addView(preview, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(250)).apply { bottomMargin = dp(12) })
+        val statusCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+            background = rounded(Color.WHITE, 18, Color.rgb(222, 237, 248))
+        }
+        val status = text("در حال آماده‌سازی دوربین…", 14f)
         senderNetworkStatus = status
-        root.addView(status)
-        root.addView(button("توقف ارسال") { stopSender(); showHome() })
-        setContentView(root)
+        statusCard.addView(text("وضعیت اتصال", 16f))
+        statusCard.addView(status)
+        root.addView(statusCard, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
+        root.addView(button("⏹  توقف ارسال و بازگشت") { stopSender(); showHome() })
+        setContentView(scroll)
 
         val future = ProcessCameraProvider.getInstance(this)
         future.addListener({
@@ -543,30 +566,65 @@ class MainActivity : AppCompatActivity() {
 
     private fun showViewer() {
         root = baseLayout()
-        root.addView(text("👶 مشاهده تصویر کودک", 23f))
-        root.addView(text("با دکمه زیر QR نمایش‌داده‌شده روی گوشی کنار کودک را اسکن کن."))
+        root.gravity = Gravity.TOP
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(root, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        val hero = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(18), dp(18), dp(18), dp(18))
+            background = rounded(Color.WHITE, 26, Color.rgb(222, 237, 248))
+            elevation = dp(5).toFloat()
+        }
+        hero.addView(text("👶", 42f))
+        hero.addView(text("اتاق کوچولوت همیشه نزدیکته", 22f))
+        hero.addView(text("گوشی والدین · نمایش زنده و امن", 13f))
+        root.addView(hero, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(16) })
+
+        val steps = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(14), dp(16), dp(14))
+            background = rounded(Color.WHITE, 22, Color.rgb(224, 237, 248))
+        }
+        steps.addView(text("✨  سه قدم تا دیدن تصویر کودک", 17f))
+        steps.addView(text("۱. کد QR روی گوشی کنار کودک را اسکن کن.\n۲. اگر لازم بود به شبکه Wi-Fi نشان‌داده‌شده وصل شو.\n۳. دکمه نمایش تصویر زنده را بزن.", 13f))
+        root.addView(steps, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(12) })
+
         val input = EditText(this).apply {
-            hint = "http://192.168.43.1:8080"
+            hint = "آدرس دوربین، مانند 192.168.43.1:8080"
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             setSingleLine(true)
+            setTextColor(Color.rgb(39, 61, 86))
+            setHintTextColor(Color.rgb(137, 157, 177))
+            setPadding(dp(14), dp(13), dp(14), dp(13))
+            background = rounded(Color.WHITE, 16, Color.rgb(202, 225, 242))
             scannedUrl?.let { setText(it) }
         }
-        root.addView(button("اسکن QR اتصال") {
+        root.addView(input, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8); bottomMargin = dp(8) })
+        root.addView(button("📷  اسکن QR اتصال") {
             val options = ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
                 .setPrompt("کد QR گوشی کنار کودک را اسکن کنید")
                 .setBeepEnabled(false).setOrientationLocked(false)
             qrScanner.launch(options)
         })
-        root.addView(input)
         if (!scannedSsid.isNullOrBlank()) {
-            root.addView(text("شبکه اسکن‌شده: $scannedSsid", 15f))
-            if (!scannedPassword.isNullOrBlank()) root.addView(text("رمز شبکه: $scannedPassword", 14f))
-            root.addView(text("ابتدا در تنظیمات Wi-Fi به شبکه بالا متصل شو و به همین برنامه برگرد.", 13f))
+            val networkCard = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(15), dp(12), dp(15), dp(12))
+                background = rounded(Color.rgb(241, 251, 247), 19, Color.rgb(203, 237, 222))
+            }
+            networkCard.addView(text("🛜  شبکه شناسایی شد", 16f))
+            networkCard.addView(text("نام شبکه: $scannedSsid", 14f))
+            if (!scannedPassword.isNullOrBlank()) networkCard.addView(text("رمز شبکه: $scannedPassword", 14f))
+            networkCard.addView(text("ابتدا به شبکه بالا متصل شو و سپس به همین برنامه برگرد.", 12f))
+            root.addView(networkCard, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8); bottomMargin = dp(8) })
         }
-        root.addView(button("بازکردن تنظیمات Wi-Fi") {
+        root.addView(button("🛜  بازکردن تنظیمات Wi-Fi") {
             startActivity(Intent(android.provider.Settings.ACTION_WIFI_SETTINGS))
         })
-        root.addView(button("نمایش تصویر زنده") {
+        root.addView(button("💗  نمایش تصویر زنده") {
             val entered = input.text.toString().trim().trimEnd('/')
             if (entered.isBlank()) toast("ابتدا QR را اسکن یا آدرس فرستنده را وارد کن.")
             else {
@@ -574,8 +632,8 @@ class MainActivity : AppCompatActivity() {
                 showWebViewer(url)
             }
         })
-        root.addView(button("بازگشت") { showHome() })
-        setContentView(root)
+        root.addView(button("بازگشت به صفحه نخست") { showHome() })
+        setContentView(scroll)
     }
 
     private fun handleScannedQr(contents: String) {
