@@ -439,7 +439,10 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             }
-            loadUrl("$url/viewer")
+            val parsed = Uri.parse(url)
+            val base = "${parsed.scheme}://${parsed.authority}"
+            val key = parsed.getQueryParameter("key") ?: ""
+            loadUrl("$base/viewer?key=${Uri.encode(key)}")
         }
         root.addView(web, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         root.addView(button("قطع اتصال") {
