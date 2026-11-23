@@ -76,9 +76,9 @@ class MainActivity : AppCompatActivity() {
     private var talkAudioManager: AudioManager? = null
     private var previousAudioMode: Int? = null
     private var previousSpeakerphone: Boolean? = null
-    private var talkFocusRequest: AudioFocusRequest? = null
+    private var talkFocusRequest: Any? = null
     private val audioSequence = AtomicLong(0L)
-    @Volatile private var latestAudioPcm: ByteArray? = null
+    @Volatile private var latestAudioPacket: Pair<Long, ByteArray>? = null
     @Volatile private var soundLevel: Double = 0.0
     @Volatile private var pendingParentTalk: Pair<String, String>? = null
 
@@ -462,7 +462,7 @@ class MainActivity : AppCompatActivity() {
                 while (ambientRecorder === recorder && !Thread.currentThread().isInterrupted) {
                     val n = recorder.read(buffer, 0, buffer.size)
                     if (n > 0) {
-                        val chunk = buffer.copyOf(n); latestAudioPcm = chunk; audioSequence.incrementAndGet()
+                        val chunk = buffer.copyOf(n); val sequence = audioSequence.incrementAndGet(); latestAudioPacket = sequence to chunk
                         var sum = 0.0; var count = 0
                         var i = 0; while (i + 1 < n) { val sample = ((chunk[i + 1].toInt() shl 8) or (chunk[i].toInt() and 255)).toShort().toInt(); sum += sample.toDouble() * sample.toDouble(); count++; i += 2 }
                         soundLevel = if (count > 0) (kotlin.math.sqrt(sum / count) / 32767.0).coerceIn(0.0, 1.0) else 0.0
@@ -562,7 +562,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startHttpServer() {
         if (cameraServer != null) return
-        val server = CameraHttpServer(8080, { latestJpeg }, { latestFrameAt }, { currentBatteryPercent() }, { sessionToken }, { soundLevel }, { latestAudioPcm }, { audioSequence.get() }, { bytes -> playTalkAudio(bytes) })
+        val server = CameraHttpServer(8080, { latestJpeg }, { latestFrameAt }, { currentBatteryPercent() }, { sessionToken }, { soundLevel }, { latestAudioPacket }, { bytes -> playTalkAudio(bytes) })
         server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
         cameraServer = server
     }
@@ -787,13 +787,13 @@ class MainActivity : AppCompatActivity() {
         talkAudioManager?.let { manager ->
             try {
                 if (Build.VERSION.SDK_INT >= 31) manager.clearCommunicationDevice()
-                talkFocusRequest?.let { if (Build.VERSION.SDK_INT >= 26) manager.abandonAudioFocusRequest(it) }
+                if (Build.VERSION.SDK_INT >= 26) (talkFocusRequest as? AudioFocusRequest)?.let { manager.abandonAudioFocusRequest(it) }
                 previousSpeakerphone?.let { @Suppress("DEPRECATION") manager.isSpeakerphoneOn = it }
                 previousAudioMode?.let { manager.mode = it }
             } catch (_: Exception) { }
         }
         talkAudioManager = null; previousAudioMode = null; previousSpeakerphone = null; talkFocusRequest = null
-        latestAudioPcm = null; audioSequence.set(0L); soundLevel = 0.0
+        latestAudioPacket = null; audioSequence.set(0L); soundLevel = 0.0
         try { cameraServer?.stop() } catch (_: Exception) { }
         cameraServer = null
         if (Build.VERSION.SDK_INT >= 26) {
@@ -824,8 +824,7 @@ private class CameraHttpServer(
     private val batteryProvider: () -> Int,
     private val tokenProvider: () -> String,
     private val soundLevelProvider: () -> Double,
-    private val audioProvider: () -> ByteArray?,
-    private val audioSequenceProvider: () -> Long,
+    private val audioPacketProvider: () -> Pair<Long, ByteArray>?,
     private val talkSink: (ByteArray) -> Unit
 ) : NanoHTTPD(port) {
     override fun serve(session: IHTTPSession): Response {
@@ -874,7 +873,7 @@ private class CameraHttpServer(
             }catch(e){label(net,'قطع ارتباط','bad');label(camera,'نامشخص','bad');label(fresh,'دریافت نمی‌شود','bad');state.textContent='ارتباط با گوشی فرستنده قطع است؛ Wi-Fi و برنامه را بررسی کنید.';state.className='bad';img.style.display='none';ready=false;label(battery,'در دسترس نیست','bad');}}
             async function detectMotion(){if(!ready||!motionOn||!img.complete||!img.naturalWidth)return;try{const c=document.createElement('canvas'),w=48,h=36;c.width=w;c.height=h;const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(img,0,0,w,h);const data=x.getImageData(0,0,w,h).data;let diff=0;if(previous){for(let i=0;i<data.length;i+=4)diff+=Math.abs(data[i]-previous[i])+Math.abs(data[i+1]-previous[i+1])+Math.abs(data[i+2]-previous[i+2]);const ratio=diff/(w*h*3*255);if(ratio>0.13&&Date.now()-lastAlert>12000){lastAlert=Date.now();alertBox.textContent='⚠️ حرکت قابل توجهی در تصویر تشخیص داده شد';alertBox.style.display='block';if(navigator.vibrate)navigator.vibrate([180,80,180]);}}previous=data;}catch(e){}}
             let listening=false,talking=false,audioContext=null,ambientLoopRunning=false;
-            document.getElementById('listen').onclick=async()=>{listening=!listening;document.getElementById('listen').textContent='👂 شنیدن صدای محیط: '+(listening?'روشن':'خاموش');if(listening){try{audioContext=new (window.AudioContext||window.webkitAudioContext)({sampleRate:16000});await audioContext.resume();}catch(e){listening=false;alert('پخش صدا در این گوشی پشتیبانی نشد.');}}else if(audioContext){await audioContext.close();audioContext=null;}};
+            document.getElementById('listen').onclick=async()=>{listening=!listening;document.getElementById('listen').textContent='👂 شنیدن صدای محیط: '+(listening?'روشن':'خاموش');if(listening){try{audioContext=new (window.AudioContext||window.webkitAudioContext)({sampleRate:16000});await audioContext.resume();playAmbient();}catch(e){listening=false;alert('پخش صدا در این گوشی پشتیبانی نشد.');}}else if(audioContext){await audioContext.close();audioContext=null;}};
             async function playAmbient(){if(ambientLoopRunning)return;ambientLoopRunning=true;while(listening&&audioContext){try{const r=await fetch(url('/ambient')+'&since='+audioSeq,{cache:'no-store'});if(r.status===204)continue;if(!r.ok)throw Error('audio');const seq=Number(r.headers.get('X-Audio-Sequence')||audioSeq);if(seq<=audioSeq)continue;audioSeq=seq;const b=await r.arrayBuffer();if(!b.byteLength)continue;const pcm=new Int16Array(b),buf=audioContext.createBuffer(1,pcm.length,16000),ch=buf.getChannelData(0);for(let i=0;i<pcm.length;i++)ch[i]=pcm[i]/32768;const src=audioContext.createBufferSource();src.buffer=buf;src.connect(audioContext.destination);const now=audioContext.currentTime;nextAudioTime=Math.max(nextAudioTime,now+0.025);src.start(nextAudioTime);nextAudioTime+=buf.duration;}catch(e){await new Promise(resolve=>setTimeout(resolve,250));}}ambientLoopRunning=false;}
             document.getElementById('talk').onclick=()=>{talking=!talking;document.getElementById('talk').textContent=talking?'⏹ توقف مکالمه':'🎙️ صحبت با کودک';if(talking){try{window.AndroidTalk.start(window.location.protocol+'//'+window.location.host,key);}catch(e){talking=false;alert('فعال‌سازی میکروفون ممکن نشد.');}}else{try{window.AndroidTalk.stop();}catch(e){}}};
             img.onerror=()=>{if(ready)setTimeout(()=>{if(ready)img.src=url('/stream')},900)};check();setInterval(check,1500);setInterval(detectMotion,1200);
@@ -894,14 +893,14 @@ private class CameraHttpServer(
         "/ambient" -> {
             val since = session.parameters["since"]?.firstOrNull()?.toLongOrNull() ?: 0L
             val deadline = System.currentTimeMillis() + 900L
-            while (audioSequenceProvider() <= since && System.currentTimeMillis() < deadline) {
+            var packet = audioPacketProvider()
+            while ((packet == null || packet.first <= since) && System.currentTimeMillis() < deadline) {
                 try { Thread.sleep(12) } catch (_: InterruptedException) { break }
+                packet = audioPacketProvider()
             }
-            val sequence = audioSequenceProvider()
-            val audio = audioProvider()
-            if (audio == null || sequence <= since) newFixedLengthResponse(Response.Status.NO_CONTENT, "application/octet-stream", "")
-            else newFixedLengthResponse(Response.Status.OK, "application/octet-stream", java.io.ByteArrayInputStream(audio), audio.size.toLong()).apply {
-                addHeader("X-Audio-Sequence", sequence.toString())
+            if (packet == null || packet.first <= since) newFixedLengthResponse(Response.Status.NO_CONTENT, "application/octet-stream", "")
+            else newFixedLengthResponse(Response.Status.OK, "application/octet-stream", java.io.ByteArrayInputStream(packet.second), packet.second.size.toLong()).apply {
+                addHeader("X-Audio-Sequence", packet.first.toString())
                 addHeader("Cache-Control", "no-store")
             }
         }
