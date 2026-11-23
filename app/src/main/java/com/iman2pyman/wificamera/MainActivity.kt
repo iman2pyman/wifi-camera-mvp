@@ -18,6 +18,7 @@ import android.view.Gravity
 import android.view.ViewGroup
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.JavascriptInterface
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageView
@@ -386,7 +387,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startHttpServer() {
         if (cameraServer != null) return
-        val server = CameraHttpServer(8080, { latestJpeg }, { latestFrameAt }, { currentBatteryPercent() }, { sessionToken }, { soundLevel })
+        val server = CameraHttpServer(8080, { latestJpeg }, { latestFrameAt }, { currentBatteryPercent() }, { sessionToken }, { soundLevel }, { latestAudioPcm }, { bytes -> playTalkAudio(bytes) })
         server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
         cameraServer = server
     }
@@ -504,12 +505,23 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private inner class TalkBridge {
+        @JavascriptInterface fun start(base: String, key: String) {
+            runOnUiThread {
+                if (ContextCompat.checkSelfPermission(this@MainActivity, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startParentTalk(base, key)
+                else { pendingParentTalk = Pair(base, key); audioPermission.launch(Manifest.permission.RECORD_AUDIO) }
+            }
+        }
+        @JavascriptInterface fun stop() { runOnUiThread { stopParentTalk() } }
+    }
+
     private fun showWebViewer(url: String) {
         val bound = bindProcessToWifiNetwork()
         root = baseLayout()
         root.addView(text("تصویر زنده کودک", 22f))
         root.addView(text(if (bound) "اتصال از مسیر Wi-Fi برقرار می‌شود." else "شبکه Wi-Fi پیدا نشد؛ مطمئن شو گوشی گیرنده به شبکه فرستنده وصل است.", 13f))
         val web = WebView(this).apply {
+            addJavascriptInterface(TalkBridge(), "AndroidTalk")
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             webViewClient = object : WebViewClient() {
@@ -585,7 +597,9 @@ private class CameraHttpServer(
     private val frameTimeProvider: () -> Long,
     private val batteryProvider: () -> Int,
     private val tokenProvider: () -> String,
-    private val soundLevelProvider: () -> Double
+    private val soundLevelProvider: () -> Double,
+    private val audioProvider: () -> ByteArray?,
+    private val talkSink: (ByteArray) -> Unit
 ) : NanoHTTPD(port) {
     override fun serve(session: IHTTPSession): Response {
         val supplied = session.parameters["key"]?.firstOrNull()
@@ -645,6 +659,22 @@ private class CameraHttpServer(
             val sound = soundLevelProvider()
             val json = """{"server":"online","cameraReady":$ready,"frameAgeMs":${if (age == Long.MAX_VALUE) -1 else age},"batteryPercent":$battery,"soundLevel":$sound,"message":"$message"}"""
             newFixedLengthResponse(Response.Status.OK, "application/json; charset=utf-8", json)
+        }
+        "/ambient" -> {
+            val audio = audioProvider()
+            if (audio == null) newFixedLengthResponse(Response.Status.NO_CONTENT, "application/octet-stream", "")
+            else newFixedLengthResponse(Response.Status.OK, "application/octet-stream", java.io.ByteArrayInputStream(audio), audio.size.toLong())
+        }
+        "/talk" -> {
+            try {
+                val files = HashMap<String, String>()
+                session.parseBody(files)
+                val path = files["postData"]
+                if (path != null) talkSink(java.io.File(path).readBytes())
+                newFixedLengthResponse(Response.Status.OK, "text/plain", "ok")
+            } catch (_: Exception) {
+                newFixedLengthResponse(Response.Status.BAD_REQUEST, "text/plain", "invalid audio")
+            }
         }
         "/snapshot.jpg" -> {
             val frame = frameProvider()
