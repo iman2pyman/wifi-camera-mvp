@@ -333,6 +333,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(statusCard, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
         root.addView(button("⏹  توقف ارسال و بازگشت") { stopSender(); showHome() })
         setContentView(scroll)
+        SenderCameraRuntime.previewSurfaceProvider = preview.surfaceProvider
 
         try {
             val cameraIntent = Intent(this, SenderCameraService::class.java)
