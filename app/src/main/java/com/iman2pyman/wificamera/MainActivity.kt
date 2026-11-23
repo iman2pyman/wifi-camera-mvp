@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.widget.ScrollView
 import android.net.wifi.WifiManager
 import android.net.Uri
 import android.net.ConnectivityManager
@@ -104,17 +106,22 @@ class MainActivity : AppCompatActivity() {
         showHome()
     }
 
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
+
     private fun baseLayout() = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
-        setPadding(22, 20, 22, 20)
-        setBackgroundColor(Color.rgb(239, 248, 255))
+        setPadding(dp(20), dp(18), dp(20), dp(22))
+        background = GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            intArrayOf(Color.rgb(226, 244, 255), Color.rgb(250, 247, 255), Color.rgb(255, 239, 244))
+        )
         layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
     }
 
     private fun text(value: String, size: Float = 16f) = TextView(this).apply {
         text = value
         textSize = size
-        setTextColor(Color.rgb(48, 72, 99))
+        setTextColor(Color.rgb(39, 61, 86))
         gravity = Gravity.CENTER
         typeface = android.graphics.Typeface.create("sans-serif-rounded", android.graphics.Typeface.NORMAL)
         setPadding(8, 9, 8, 9)
@@ -127,14 +134,14 @@ class MainActivity : AppCompatActivity() {
         typeface = android.graphics.Typeface.create("sans-serif-rounded", android.graphics.Typeface.BOLD)
         setTextColor(Color.WHITE)
         backgroundTintList = android.content.res.ColorStateList.valueOf(
-            if (value.contains("دریافت") || value.contains("بازگشت") || value.contains("قطع")) Color.rgb(238, 151, 177)
-            else Color.rgb(66, 157, 218)
+            if (value.contains("دریافت") || value.contains("بازگشت") || value.contains("قطع") || value.contains("راهنما") || value.contains("درباره")) Color.rgb(226, 112, 151)
+            else Color.rgb(32, 139, 201)
         )
         elevation = 7f
         stateListAnimator = null
         setPadding(12, 9, 12, 9)
         val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        lp.setMargins(0, 8, 0, 8)
+        lp.setMargins(0, dp(7), 0, dp(7))
         layoutParams = lp
         setOnClickListener { action() }
     }
@@ -165,13 +172,113 @@ class MainActivity : AppCompatActivity() {
     private fun showHome() {
         root = baseLayout()
         root.gravity = Gravity.CENTER_HORIZONTAL
-        addBrandHeader(root)
-        root.addView(text("برای شروع، نقش هر گوشی را انتخاب کنید.", 15f))
-        root.addView(button("📷  گوشی کنار کودک — ارسال تصویر") { beginSender() })
-        root.addView(button("👀  گوشی والدین — مشاهده تصویر") { showViewer() })
-        root.addView(text("اتصال مستقیم دو گوشی، بدون مودم و بدون اینترنت", 13f))
-        root.addView(text("برای حفظ حریم خصوصی، فقط با افراد مورد اعتماد اتصال برقرار کنید.", 12f))
-        setContentView(root)
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            clipToPadding = false
+            setPadding(0, 0, 0, dp(8))
+            addView(root, ScrollView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        val hero = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(16), dp(14), dp(16), dp(18))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(28).toFloat()
+                setColor(Color.WHITE)
+                setStroke(dp(1), Color.rgb(221, 237, 249))
+            }
+            elevation = dp(5).toFloat()
+        }
+        val icon = ImageView(this).apply {
+            setImageResource(R.drawable.ic_baby_monitor)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        hero.addView(icon, LinearLayout.LayoutParams(dp(142), dp(142)).apply { gravity = Gravity.CENTER })
+        hero.addView(text("دوربین کنترل کودک", 27f))
+        hero.addView(text("آرامش خاطر، با یک نگاه به کوچولوی شما", 14f))
+        root.addView(hero, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(18) })
+
+        root.addView(text("همراه کوچک مراقبت از کودک", 19f))
+        root.addView(text("برای شروع، نقش هر گوشی را انتخاب کنید.", 14f))
+        val senderCard = homeActionCard("📷", "گوشی کنار کودک", "این گوشی نزدیک نوزاد یا کودک می‌ماند و تصویر دوربین را ارسال می‌کند.", Color.rgb(34, 145, 207)) { beginSender() }
+        root.addView(senderCard)
+        val viewerCard = homeActionCard("👀", "گوشی والدین", "از گوشی دوم، تصویر زنده و وضعیت اتصال را مشاهده کنید.", Color.rgb(220, 112, 151)) { showViewer() }
+        root.addView(viewerCard)
+
+        val useCases = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(13), dp(16), dp(13))
+            background = rounded(Color.WHITE, 22, Color.rgb(232, 239, 249))
+        }
+        useCases.addView(text("🌙  مراقبت در لحظه‌های روزمره", 17f))
+        useCases.addView(text("• وقتی والدین مشغول غذا خوردن هستند و می‌خواهند کودک را زیر نظر داشته باشند.\n• وقتی مادر در اتاق دیگری است و می‌خواهد از وضعیت نوزاد باخبر بماند.\n• وقتی والدین کمی زمان خصوصی دارند و می‌خواهند در عین حال تصویر کودک را بررسی کنند.", 13f))
+        root.addView(useCases, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12); bottomMargin = dp(10) })
+
+        root.addView(button("📘  راهنمای برنامه و روش راه‌اندازی") { showGuideDialog() })
+        root.addView(button("ℹ️  درباره برنامه و سازنده") { showAboutDialog() })
+        root.addView(text("اتصال مستقیم دو گوشی؛ بدون نیاز به مودم یا اینترنت", 13f))
+        root.addView(text("این برنامه فقط ابزار کمکی است و جایگزین مراقبت مستقیم بزرگسال از کودک نیست. رمز شبکه را فقط با افراد مورد اعتماد به اشتراک بگذارید.", 11f))
+        setContentView(scroll)
+    }
+
+    private fun rounded(fill: Int, radiusDp: Int, stroke: Int = Color.TRANSPARENT) = GradientDrawable().apply {
+        shape = GradientDrawable.RECTANGLE
+        cornerRadius = dp(radiusDp).toFloat()
+        setColor(fill)
+        if (stroke != Color.TRANSPARENT) setStroke(dp(1), stroke)
+    }
+
+    private fun homeActionCard(emoji: String, heading: String, description: String, accent: Int, action: () -> Unit): LinearLayout {
+        val card = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(15), dp(12), dp(15), dp(12))
+            background = rounded(Color.WHITE, 22, Color.rgb(222, 237, 248))
+            elevation = dp(4).toFloat()
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { action() }
+        }
+        val symbol = TextView(this).apply {
+            text = emoji
+            textSize = 34f
+            gravity = Gravity.CENTER
+            setTextColor(accent)
+        }
+        card.addView(symbol, LinearLayout.LayoutParams(dp(62), dp(62)))
+        val copy = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL }
+        copy.addView(TextView(this).apply {
+            text = heading
+            textSize = 17f
+            setTextColor(accent)
+            typeface = android.graphics.Typeface.create("sans-serif-rounded", android.graphics.Typeface.BOLD)
+        })
+        copy.addView(TextView(this).apply {
+            text = description
+            textSize = 12f
+            setTextColor(Color.rgb(83, 103, 126))
+            setPadding(0, dp(4), 0, 0)
+        })
+        card.addView(copy, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        return card.apply { layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8); bottomMargin = dp(8) } }
+    }
+
+    private fun showGuideDialog() {
+        val guide = "۱) برنامه را روی دو گوشی نصب کنید.\n\n۲) گوشی‌ای که کنار کودک قرار می‌گیرد را باز کنید و «گوشی کنار کودک — ارسال تصویر» را بزنید؛ اجازه دوربین و دستگاه‌های نزدیک را بدهید.\n\n۳) شبکه Wi-Fi اختصاصی و QR روی گوشی فرستنده نمایش داده می‌شود.\n\n۴) در گوشی والدین، «گوشی والدین — مشاهده تصویر» و سپس «اسکن QR اتصال» را انتخاب کنید.\n\n۵) به شبکه نمایش‌داده‌شده متصل شوید و «نمایش تصویر زنده» را بزنید.\n\nاگر اتصال خودکار شبکه در گوشی فرستنده پشتیبانی نشود، راهنمای روشن‌کردن هات‌اسپات دستی نمایش داده می‌شود. هر دو گوشی باید نزدیک هم باشند. اینترنت و مودم لازم نیست."
+        android.app.AlertDialog.Builder(this)
+            .setTitle("📘 راهنمای راه‌اندازی")
+            .setMessage(guide)
+            .setPositiveButton("متوجه شدم", null)
+            .show()
+    }
+
+    private fun showAboutDialog() {
+        android.app.AlertDialog.Builder(this)
+            .setTitle("درباره دوربین کنترل کودک")
+            .setMessage("نام برنامه: دوربین کنترل کودک\nنام انگلیسی: Baby Monitor Camera\n\nاین برنامه برای مشاهده تصویر کودک از طریق اتصال محلی دو گوشی طراحی شده است.\n\nنام سازنده در نسخه نهایی درج خواهد شد.")
+            .setPositiveButton("بستن", null)
+            .show()
     }
 
     private fun startSenderCamera() {
