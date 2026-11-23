@@ -716,15 +716,15 @@ private class CameraHttpServer(
         "/viewer" -> {
             val pageToken = tokenProvider()
             val html = """<!doctype html><html lang="fa" dir="rtl"><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta charset="utf-8"><style>
-            *{box-sizing:border-box}body{margin:0;background:#eff8ff;color:#304863;font-family:sans-serif;padding:12px}
-            header{text-align:center;font-size:23px;font-weight:bold;padding:8px}
-            #connection{background:#fff;border-radius:16px;padding:12px;margin:8px 0;box-shadow:0 3px 12px #0001}
-            .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.item{background:#f5f9fc;border-radius:12px;padding:11px;text-align:center}
-            .value{display:block;font-size:17px;font-weight:bold;margin-top:5px}.ok{color:#16865b}.warn{color:#bd7b16}.bad{color:#c43d58}
-            #state{padding:9px;text-align:center;font-size:14px}#stage{background:#111;border-radius:14px;min-height:48vh;display:flex;align-items:center;justify-content:center;overflow:hidden}
-            #live{width:100%;max-height:66vh;object-fit:contain;transition:filter .2s}#hint{text-align:center;font-size:12px;color:#60758b;padding:8px}
-            .controls{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.controls button{flex:1;min-width:42%;border:0;border-radius:12px;padding:12px;background:#ed9ab5;color:#fff;font-weight:bold;font-size:14px}
-            #alert{display:none;background:#fff0f2;color:#bd3155;border-radius:12px;padding:10px;text-align:center;font-weight:bold;margin:8px 0}
+            *{box-sizing:border-box}body{margin:0;background:linear-gradient(145deg,#e3f5ff 0%,#f7f4ff 54%,#fff0f5 100%);color:#263e59;font-family:Arial,sans-serif;padding:14px}
+            header{text-align:center;font-size:25px;font-weight:900;padding:12px 8px 16px;color:#167db7}
+            #connection{background:rgba(255,255,255,.96);border:1px solid #dcecf7;border-radius:24px;padding:14px;margin:8px 0 14px;box-shadow:0 7px 22px #477da51c}
+            .grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.item{background:#f0f8fd;border:1px solid #e2eff8;border-radius:17px;padding:13px 8px;text-align:center;font-size:13px;font-weight:700}
+            .value{display:block;font-size:17px;font-weight:900;margin-top:7px}.ok{color:#16865b}.warn{color:#bd7b16}.bad{color:#c43d58}
+            #state{padding:12px;text-align:center;font-size:14px;font-weight:700}#stage{background:#152b40;border:3px solid white;border-radius:23px;min-height:48vh;display:flex;align-items:center;justify-content:center;overflow:hidden;box-shadow:0 8px 24px #25445c25}
+            #live{width:100%;max-height:66vh;object-fit:contain;transition:filter .2s}#hint{text-align:center;font-size:12px;color:#60758b;padding:12px;line-height:1.9}
+            .controls{display:flex;gap:9px;flex-wrap:wrap;margin:11px 0}.controls button{flex:1;min-width:42%;border:0;border-radius:16px;padding:14px 10px;background:linear-gradient(135deg,#ed86a8,#d95e89);box-shadow:0 4px 10px #d95e8930;color:#fff;font-weight:800;font-size:14px}
+            .controls button:active{transform:scale(.98)}#alert{display:none;background:#fff0f3;border:1px solid #ffd1df;color:#bd3155;border-radius:16px;padding:13px;text-align:center;font-weight:800;margin:10px 0}
             </style></head><body><header>👶 دوربین کنترل کودک</header>
             <section id="connection"><div class="grid">
             <div class="item">اتصال گوشی<span id="net" class="value warn">در حال بررسی…</span></div>
