@@ -68,7 +68,7 @@ class MainActivity : AppCompatActivity() {
     private val executor = Executors.newSingleThreadExecutor()
     @Volatile private var latestJpeg: ByteArray? = null
     @Volatile private var latestFrameAt: Long = 0L
-    private val ambientPackets = LinkedBlockingDeque<Pair<Long, ByteArray>>(40)
+    private val ambientPackets = LinkedBlockingDeque<Pair<Long, ByteArray>>(12)
     private var senderNetworkStatus: TextView? = null
     private var hotspotReservation: Any? = null
     private var fallbackHotspotMode = false
@@ -106,7 +106,10 @@ class MainActivity : AppCompatActivity() {
         if (granted) {
             val pending = pendingParentTalk
             if (pending != null) { pendingParentTalk = null; startParentTalk(pending.first, pending.second) }
-            else startSoundMonitor()
+            else {
+                startSoundMonitor()
+                try { startService(Intent(this, SenderCameraService::class.java).putExtra("enable_audio", true)) } catch (_: Exception) { }
+            }
         } else toast("اجازه میکروفون داده نشد؛ قابلیت‌های صوتی غیرفعال هستند.")
     }
     private val wifiPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -456,22 +459,51 @@ class MainActivity : AppCompatActivity() {
         try {
             val rate = 16000
             val min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-            val recorder = AudioRecord(android.media.MediaRecorder.AudioSource.MIC, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, 6400))
-            recorder.startRecording(); ambientRecorder = recorder
+            if (min <= 0) throw IllegalStateException("تنظیمات ضبط صدا پشتیبانی نمی‌شود")
+            val recorder = AudioRecord(android.media.MediaRecorder.AudioSource.VOICE_RECOGNITION, rate,
+                AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min * 2, 12800))
+            if (recorder.state != AudioRecord.STATE_INITIALIZED) {
+                recorder.release()
+                throw IllegalStateException("میکروفون آماده ضبط نیست")
+            }
+            ambientPackets.clear()
+            recorder.startRecording()
+            if (recorder.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                recorder.release()
+                throw IllegalStateException("ضبط صدا شروع نشد")
+            }
+            ambientRecorder = recorder
             ambientThread = Thread {
                 val buffer = ByteArray(3200)
                 while (ambientRecorder === recorder && !Thread.currentThread().isInterrupted) {
-                    val n = recorder.read(buffer, 0, buffer.size)
+                    val n = recorder.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
                     if (n > 0) {
-                        val chunk = buffer.copyOf(n); val sequence = audioSequence.incrementAndGet(); latestAudioPacket = sequence to chunk
-                        if (!ambientPackets.offerLast(sequence to chunk)) { ambientPackets.pollFirst(); ambientPackets.offerLast(sequence to chunk) }
-                        var sum = 0.0; var count = 0
-                        var i = 0; while (i + 1 < n) { val sample = ((chunk[i + 1].toInt() shl 8) or (chunk[i].toInt() and 255)).toShort().toInt(); sum += sample.toDouble() * sample.toDouble(); count++; i += 2 }
+                        val chunk = buffer.copyOf(n)
+                        val sequence = audioSequence.incrementAndGet()
+                        latestAudioPacket = sequence to chunk
+                        if (!ambientPackets.offerLast(sequence to chunk)) {
+                            ambientPackets.pollFirst()
+                            ambientPackets.offerLast(sequence to chunk)
+                        }
+                        var sum = 0.0
+                        var count = 0
+                        var i = 0
+                        while (i + 1 < n) {
+                            val sample = ((chunk[i + 1].toInt() shl 8) or (chunk[i].toInt() and 255)).toShort().toInt()
+                            sum += sample.toDouble() * sample.toDouble()
+                            count++
+                            i += 2
+                        }
                         soundLevel = if (count > 0) (kotlin.math.sqrt(sum / count) / 32767.0).coerceIn(0.0, 1.0) else 0.0
+                    } else if (n == AudioRecord.ERROR_INVALID_OPERATION || n == AudioRecord.ERROR_DEAD_OBJECT) {
+                        break
                     }
                 }
-            }.apply { isDaemon = true; start() }
-        } catch (_: Exception) { soundLevel = 0.0; toast("پایش صدای محیط فعال نشد.") }
+            }.apply { name = "AmbientAudioCapture"; isDaemon = true; start() }
+        } catch (e: Exception) {
+            soundLevel = 0.0
+            toast("ضبط صدای محیط فعال نشد: ${e.message}")
+        }
     }
 
     private fun startParentTalk(base: String, key: String) {
@@ -479,21 +511,46 @@ class MainActivity : AppCompatActivity() {
         try {
             val rate = 16000
             val min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-            val recorder = AudioRecord(android.media.MediaRecorder.AudioSource.MIC, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, 12800))
-            recorder.startRecording(); talkRecorder = recorder
+            if (min <= 0) throw IllegalStateException("تنظیمات میکروفون پشتیبانی نمی‌شود")
+            val recorder = AudioRecord(android.media.MediaRecorder.AudioSource.MIC, rate,
+                AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min * 2, 25600))
+            if (recorder.state != AudioRecord.STATE_INITIALIZED) {
+                recorder.release()
+                throw IllegalStateException("میکروفون گوشی والدین آماده نیست")
+            }
+            recorder.startRecording()
+            if (recorder.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                recorder.release()
+                throw IllegalStateException("ضبط صدای والد شروع نشد")
+            }
+            talkRecorder = recorder
             talkThread = Thread {
-                val buffer = ByteArray(6400)
+                val buffer = ByteArray(12800)
                 while (talkRecorder === recorder && !Thread.currentThread().isInterrupted) {
-                    val n = recorder.read(buffer, 0, buffer.size)
-                    if (n > 0) try {
-                        val connection = java.net.URL("$base/talk?key=${Uri.encode(key)}").openConnection() as java.net.HttpURLConnection
-                        connection.requestMethod = "POST"; connection.doOutput = true; connection.connectTimeout = 4000; connection.readTimeout = 4000
-                        connection.setRequestProperty("Content-Type", "application/octet-stream")
-                        connection.outputStream.use { it.write(buffer, 0, n) }; connection.inputStream.close(); connection.disconnect()
-                    } catch (_: Exception) { }
+                    val n = recorder.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
+                    if (n > 0) {
+                        var connection: java.net.HttpURLConnection? = null
+                        try {
+                            connection = java.net.URL("$base/talk?key=${Uri.encode(key)}").openConnection() as java.net.HttpURLConnection
+                            connection.requestMethod = "POST"
+                            connection.doOutput = true
+                            connection.connectTimeout = 2500
+                            connection.readTimeout = 2500
+                            connection.setRequestProperty("Content-Type", "application/octet-stream")
+                            connection.setRequestProperty("Content-Length", n.toString())
+                            connection.outputStream.use { it.write(buffer, 0, n) }
+                            val code = connection.responseCode
+                            if (code !in 200..299) connection.errorStream?.close()
+                        } catch (_: Exception) {
+                        } finally { connection?.disconnect() }
+                    } else if (n == AudioRecord.ERROR_INVALID_OPERATION || n == AudioRecord.ERROR_DEAD_OBJECT) {
+                        break
+                    }
                 }
-            }.apply { isDaemon = true; start() }
-        } catch (_: Exception) { toast("میکروفون گوشی والدین فعال نشد.") }
+            }.apply { name = "ParentTalkCapture"; isDaemon = true; start() }
+        } catch (e: Exception) {
+            toast("میکروفون گوشی والدین فعال نشد: ${e.message}")
+        }
     }
 
     private fun stopParentTalk() {
