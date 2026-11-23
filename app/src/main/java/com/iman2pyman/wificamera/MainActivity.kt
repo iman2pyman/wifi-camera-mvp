@@ -49,8 +49,11 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.AudioAttributes
+import android.media.AudioManager
+import android.media.AudioFocusRequest
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 class MainActivity : AppCompatActivity() {
     private lateinit var root: LinearLayout
@@ -70,6 +73,11 @@ class MainActivity : AppCompatActivity() {
     private var talkRecorder: AudioRecord? = null
     private var talkThread: Thread? = null
     private var talkTrack: AudioTrack? = null
+    private var talkAudioManager: AudioManager? = null
+    private var previousAudioMode: Int? = null
+    private var previousSpeakerphone: Boolean? = null
+    private var talkFocusRequest: AudioFocusRequest? = null
+    private val audioSequence = AtomicLong(0L)
     @Volatile private var latestAudioPcm: ByteArray? = null
     @Volatile private var soundLevel: Double = 0.0
     @Volatile private var pendingParentTalk: Pair<String, String>? = null
@@ -324,7 +332,7 @@ class MainActivity : AppCompatActivity() {
                 val provider = future.get()
                 val previewUseCase = androidx.camera.core.Preview.Builder().build()
                 val captureUseCase = ImageCapture.Builder()
-                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).build()
+                    .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).setJpegQuality(70).build()
                 imageCapture = captureUseCase
                 previewUseCase.setSurfaceProvider(preview.surfaceProvider)
                 provider.unbindAll()
@@ -454,7 +462,7 @@ class MainActivity : AppCompatActivity() {
                 while (ambientRecorder === recorder && !Thread.currentThread().isInterrupted) {
                     val n = recorder.read(buffer, 0, buffer.size)
                     if (n > 0) {
-                        val chunk = buffer.copyOf(n); latestAudioPcm = chunk
+                        val chunk = buffer.copyOf(n); latestAudioPcm = chunk; audioSequence.incrementAndGet()
                         var sum = 0.0; var count = 0
                         var i = 0; while (i + 1 < n) { val sample = ((chunk[i + 1].toInt() shl 8) or (chunk[i].toInt() and 255)).toShort().toInt(); sum += sample.toDouble() * sample.toDouble(); count++; i += 2 }
                         soundLevel = if (count > 0) (kotlin.math.sqrt(sum / count) / 32767.0).coerceIn(0.0, 1.0) else 0.0
@@ -469,15 +477,15 @@ class MainActivity : AppCompatActivity() {
         try {
             val rate = 16000
             val min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
-            val recorder = AudioRecord(android.media.MediaRecorder.AudioSource.MIC, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, 6400))
+            val recorder = AudioRecord(android.media.MediaRecorder.AudioSource.MIC, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(min, 12800))
             recorder.startRecording(); talkRecorder = recorder
             talkThread = Thread {
-                val buffer = ByteArray(3200)
+                val buffer = ByteArray(6400)
                 while (talkRecorder === recorder && !Thread.currentThread().isInterrupted) {
                     val n = recorder.read(buffer, 0, buffer.size)
                     if (n > 0) try {
                         val connection = java.net.URL("$base/talk?key=${Uri.encode(key)}").openConnection() as java.net.HttpURLConnection
-                        connection.requestMethod = "POST"; connection.doOutput = true; connection.connectTimeout = 2500; connection.readTimeout = 2500
+                        connection.requestMethod = "POST"; connection.doOutput = true; connection.connectTimeout = 4000; connection.readTimeout = 4000
                         connection.setRequestProperty("Content-Type", "application/octet-stream")
                         connection.outputStream.use { it.write(buffer, 0, n) }; connection.inputStream.close(); connection.disconnect()
                     } catch (_: Exception) { }
@@ -517,7 +525,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startHttpServer() {
         if (cameraServer != null) return
-        val server = CameraHttpServer(8080, { latestJpeg }, { latestFrameAt }, { currentBatteryPercent() }, { sessionToken }, { soundLevel }, { latestAudioPcm }, { bytes -> playTalkAudio(bytes) })
+        val server = CameraHttpServer(8080, { latestJpeg }, { latestFrameAt }, { currentBatteryPercent() }, { sessionToken }, { soundLevel }, { latestAudioPcm }, { audioSequence.get() }, { bytes -> playTalkAudio(bytes) })
         server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
         cameraServer = server
     }
@@ -558,7 +566,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     })
                 }
-                handler.postDelayed(this, 650)
+                handler.postDelayed(this, 300)
             }
         }
         handler.post(task)
@@ -764,6 +772,7 @@ private class CameraHttpServer(
     private val tokenProvider: () -> String,
     private val soundLevelProvider: () -> Double,
     private val audioProvider: () -> ByteArray?,
+    private val audioSequenceProvider: () -> Long,
     private val talkSink: (ByteArray) -> Unit
 ) : NanoHTTPD(port) {
     override fun serve(session: IHTTPSession): Response {
