@@ -41,6 +41,7 @@ import fi.iki.elonen.NanoHTTPD
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.Collections
+import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -56,6 +57,7 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var captureBusy = false
     private var hotspotReservation: Any? = null
     private var fallbackHotspotMode = false
+    @Volatile private var sessionToken: String = UUID.randomUUID().toString().replace("-", "")
 
     private var scannedSsid: String? = null
     private var scannedPassword: String? = null
@@ -247,7 +249,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(text("شبکه اختصاصی آماده است", 20f))
         root.addView(text("در گوشی والدین، برنامه را باز کن و گزینه «اسکن QR اتصال» را بزن.", 14f))
         val qr = ImageView(this)
-        val endpoint = if (ip != null) "http://$ip:8080" else ""
+        val endpoint = if (ip != null) "http://$ip:8080?key=$sessionToken" else ""
         val qrData = "babymonitor://connect?ssid=${Uri.encode(ssid)}&password=${Uri.encode(password)}&url=${Uri.encode(endpoint)}"
         try { qr.setImageBitmap(makeQr(qrData)); root.addView(qr, LinearLayout.LayoutParams(190, 190).apply { gravity = Gravity.CENTER }) } catch (_: Exception) { }
         root.addView(text("نام شبکه: $ssid", 14f))
@@ -304,7 +306,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startHttpServer() {
         if (cameraServer != null) return
-        val server = CameraHttpServer(8080, { latestJpeg }, { latestFrameAt }, { currentBatteryPercent() })
+        val server = CameraHttpServer(8080, { latestJpeg }, { latestFrameAt }, { currentBatteryPercent() }, { sessionToken })
         server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
         cameraServer = server
     }
@@ -464,6 +466,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopSender() {
         streaming.set(false)
+        sessionToken = UUID.randomUUID().toString().replace("-", "")
         try { cameraServer?.stop() } catch (_: Exception) { }
         cameraServer = null
         if (Build.VERSION.SDK_INT >= 26) {
@@ -491,19 +494,26 @@ private class CameraHttpServer(
     port: Int,
     private val frameProvider: () -> ByteArray?,
     private val frameTimeProvider: () -> Long,
-    private val batteryProvider: () -> Int
+    private val batteryProvider: () -> Int,
+    private val tokenProvider: () -> String
 ) : NanoHTTPD(port) {
-    override fun serve(session: IHTTPSession): Response = when (session.uri) {
+    override fun serve(session: IHTTPSession): Response {
+        val supplied = session.parameters["key"]?.firstOrNull()
+        if (supplied != tokenProvider()) return newFixedLengthResponse(Response.Status.FORBIDDEN, "text/plain; charset=utf-8", "Unauthorized device")
+        return when (session.uri) {
         "/" -> newFixedLengthResponse(Response.Status.OK, "text/plain; charset=utf-8", "Baby Monitor Camera server is running. Open /viewer on the parent phone.")
-        "/viewer" -> newFixedLengthResponse(Response.Status.OK, "text/html; charset=utf-8",
-            """<!doctype html><html lang="fa" dir="rtl"><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta charset="utf-8"><style>
+        "/viewer" -> {
+            val pageToken = tokenProvider()
+            val html = """<!doctype html><html lang="fa" dir="rtl"><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta charset="utf-8"><style>
             *{box-sizing:border-box}body{margin:0;background:#eff8ff;color:#304863;font-family:sans-serif;padding:12px}
-            header{text-align:center;font-size:22px;font-weight:bold;padding:8px}
-            #connection{background:#fff;border-radius:14px;padding:12px;margin:8px 0;box-shadow:0 2px 8px #0001}
-            .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.item{background:#f5f9fc;border-radius:10px;padding:10px;text-align:center}
+            header{text-align:center;font-size:23px;font-weight:bold;padding:8px}
+            #connection{background:#fff;border-radius:16px;padding:12px;margin:8px 0;box-shadow:0 3px 12px #0001}
+            .grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.item{background:#f5f9fc;border-radius:12px;padding:11px;text-align:center}
             .value{display:block;font-size:17px;font-weight:bold;margin-top:5px}.ok{color:#16865b}.warn{color:#bd7b16}.bad{color:#c43d58}
-            #state{padding:9px;text-align:center;font-size:14px}#stage{background:#111;border-radius:12px;min-height:48vh;display:flex;align-items:center;justify-content:center;overflow:hidden}
-            #live{width:100%;max-height:66vh;object-fit:contain}#hint{text-align:center;font-size:12px;color:#60758b;padding:8px}
+            #state{padding:9px;text-align:center;font-size:14px}#stage{background:#111;border-radius:14px;min-height:48vh;display:flex;align-items:center;justify-content:center;overflow:hidden}
+            #live{width:100%;max-height:66vh;object-fit:contain;transition:filter .2s}#hint{text-align:center;font-size:12px;color:#60758b;padding:8px}
+            .controls{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.controls button{flex:1;min-width:42%;border:0;border-radius:12px;padding:12px;background:#ed9ab5;color:#fff;font-weight:bold;font-size:14px}
+            #alert{display:none;background:#fff0f2;color:#bd3155;border-radius:12px;padding:10px;text-align:center;font-weight:bold;margin:8px 0}
             </style></head><body><header>👶 دوربین کنترل کودک</header>
             <section id="connection"><div class="grid">
             <div class="item">اتصال گوشی<span id="net" class="value warn">در حال بررسی…</span></div>
@@ -511,41 +521,31 @@ private class CameraHttpServer(
             <div class="item">وضعیت دوربین<span id="camera" class="value warn">در انتظار</span></div>
             <div class="item">تازگی تصویر<span id="fresh" class="value">--</span></div>
             </div><div id="state">در حال بررسی ارتباط با گوشی فرستنده…</div></section>
+            <div id="alert">⚠️ حرکت قابل توجهی در تصویر تشخیص داده شد</div>
             <div id="stage"><img id="live" style="display:none" alt="تصویر زنده کودک"></div>
-            <div id="hint">ارتباط مستقیم محلی · بدون نیاز به اینترنت</div>
+            <div class="controls"><button id="night">🌙 حالت دید در شب: خاموش</button><button id="motion">🔔 هشدار حرکت: روشن</button></div>
+            <div class="controls"><button id="sound">🔊 هشدار صدای بلند: روشن</button><button id="talk">🎙️ صحبت با کودک</button></div>
+            <div id="hint">اتصال محلی امن · بدون نیاز به اینترنت</div>
             <script>
-            const img=document.getElementById('live'),state=document.getElementById('state');
-            const net=document.getElementById('net'),battery=document.getElementById('battery');
-            const camera=document.getElementById('camera'),fresh=document.getElementById('fresh');
-            let ready=false;
+            const key='__KEY__',img=document.getElementById('live'),state=document.getElementById('state');
+            const net=document.getElementById('net'),battery=document.getElementById('battery'),camera=document.getElementById('camera'),fresh=document.getElementById('fresh'),alertBox=document.getElementById('alert');
+            let ready=false,night=false,motionOn=true,soundOn=true,previous=null,lastAlert=0;
             function label(el,value,kind){el.textContent=value;el.className='value '+kind}
-            async function check(){
-              try{
-                const r=await fetch('/status?t='+Date.now(),{cache:'no-store'});
-                if(!r.ok)throw Error('server');
-                const s=await r.json();
-                label(net,'متصل','ok');
-                label(battery,s.batteryPercent>=0?s.batteryPercent+'٪':'نامشخص',s.batteryPercent>=20?'ok':'warn');
-                if(s.cameraReady){
-                  label(camera,'فعال','ok');const age=s.frameAgeMs||0;label(fresh,age<1500?'روان':age<3000?'قابل قبول':'با تأخیر',age<3000?'ok':'warn');
-                  state.textContent='تصویر زنده در حال دریافت است';state.className='ok';
-                  img.style.display='block';
-                  if(!ready){img.src='/snapshot.jpg?t='+Date.now();ready=true;}
-                }else{
-                  label(camera,'آماده نیست','warn');label(fresh,'بدون تصویر','warn');
-                  state.textContent=s.message||'شبکه وصل است؛ منتظر آماده‌شدن دوربین…';
-                  state.className='warn';img.style.display='none';ready=false;
-                }
-              }catch(e){
-                label(net,'قطع ارتباط','bad');label(camera,'نامشخص','bad');
-                label(fresh,'دریافت نمی‌شود','bad');state.textContent='ارتباط با گوشی فرستنده قطع است؛ Wi-Fi و روشن‌بودن برنامه را بررسی کنید.';
-                state.className='bad';img.style.display='none';ready=false;
-                label(battery,'در دسترس نیست','bad');
-              }
-            }
-            check();setInterval(check,1500);
-            setInterval(()=>{if(ready)img.src='/snapshot.jpg?t='+Date.now()},700);
-            </script></body></html>""")
+            function url(path){return path+'?key='+encodeURIComponent(key)+'&t='+Date.now()}
+            document.getElementById('night').onclick=()=>{night=!night;img.style.filter=night?'grayscale(1) brightness(1.65) contrast(1.15)':'none';document.getElementById('night').textContent='🌙 حالت دید در شب: '+(night?'روشن':'خاموش')};
+            document.getElementById('motion').onclick=()=>{motionOn=!motionOn;document.getElementById('motion').textContent='🔔 هشدار حرکت: '+(motionOn?'روشن':'خاموش')};
+            document.getElementById('sound').onclick=()=>{soundOn=!soundOn;document.getElementById('sound').textContent='🔊 هشدار صدای بلند: '+(soundOn?'روشن':'خاموش')};
+            async function check(){try{const r=await fetch(url('/status'),{cache:'no-store'});if(!r.ok)throw Error('server');const s=await r.json();label(net,'متصل','ok');label(battery,s.batteryPercent>=0?s.batteryPercent+'٪':'نامشخص',s.batteryPercent>=20?'ok':'warn');
+            if(s.cameraReady){label(camera,'فعال','ok');const age=s.frameAgeMs||0;label(fresh,age<1500?'روان':age<3000?'قابل قبول':'با تأخیر',age<3000?'ok':'warn');state.textContent='تصویر زنده در حال دریافت است';state.className='ok';img.style.display='block';if(!ready){img.src=url('/snapshot.jpg');ready=true;}}
+            else{label(camera,'آماده نیست','warn');label(fresh,'بدون تصویر','warn');state.textContent=s.message||'منتظر آماده‌شدن دوربین…';state.className='warn';img.style.display='none';ready=false;}
+            if(soundOn&&s.soundLevel>0.72&&Date.now()-lastAlert>12000){lastAlert=Date.now();alertBox.textContent='🔊 صدای بلند در محیط کودک تشخیص داده شد';alertBox.style.display='block';}
+            }catch(e){label(net,'قطع ارتباط','bad');label(camera,'نامشخص','bad');label(fresh,'دریافت نمی‌شود','bad');state.textContent='ارتباط با گوشی فرستنده قطع است؛ Wi-Fi و برنامه را بررسی کنید.';state.className='bad';img.style.display='none';ready=false;label(battery,'در دسترس نیست','bad');}}
+            async function detectMotion(){if(!ready||!motionOn||!img.complete||!img.naturalWidth)return;try{const c=document.createElement('canvas'),w=48,h=36;c.width=w;c.height=h;const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(img,0,0,w,h);const data=x.getImageData(0,0,w,h).data;let diff=0;if(previous){for(let i=0;i<data.length;i+=4)diff+=Math.abs(data[i]-previous[i])+Math.abs(data[i+1]-previous[i+1])+Math.abs(data[i+2]-previous[i+2]);const ratio=diff/(w*h*3*255);if(ratio>0.13&&Date.now()-lastAlert>12000){lastAlert=Date.now();alertBox.textContent='⚠️ حرکت قابل توجهی در تصویر تشخیص داده شد';alertBox.style.display='block';if(navigator.vibrate)navigator.vibrate([180,80,180]);}}previous=data;}catch(e){}}
+            document.getElementById('talk').onclick=()=>{alert('مکالمه دوطرفه در مرحله بعدی با مجوز میکروفون فعال می‌شود.');};
+            check();setInterval(check,1500);setInterval(()=>{if(ready)img.src=url('/snapshot.jpg')},900);setInterval(detectMotion,1200);
+            </script></body></html>""".replace("__KEY__", pageToken)
+            newFixedLengthResponse(Response.Status.OK, "text/html; charset=utf-8", html)
+        }
         "/status" -> {
             val frameAt = frameTimeProvider()
             val age = if (frameAt == 0L) Long.MAX_VALUE else android.os.SystemClock.elapsedRealtime() - frameAt
@@ -562,6 +562,7 @@ private class CameraHttpServer(
         }
         "/stream" -> streamResponse()
         else -> newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "Not found")
+        }
     }
 
     private fun streamResponse(): Response {
