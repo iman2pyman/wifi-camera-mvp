@@ -503,10 +503,47 @@ class MainActivity : AppCompatActivity() {
     private fun playTalkAudio(bytes: ByteArray) {
         try {
             if (talkTrack == null) {
+                val manager = getSystemService(AUDIO_SERVICE) as AudioManager
+                talkAudioManager = manager
+                previousAudioMode = manager.mode
+                previousSpeakerphone = manager.isSpeakerphoneOn
+                manager.mode = AudioManager.MODE_IN_COMMUNICATION
+                @Suppress("DEPRECATION")
+                manager.isSpeakerphoneOn = true
+                if (Build.VERSION.SDK_INT >= 31) {
+                    val speaker = manager.availableCommunicationDevices.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                    if (speaker != null) manager.setCommunicationDevice(speaker)
+                }
+                val attributes = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
+                if (Build.VERSION.SDK_INT >= 26) {
+                    val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                        .setAudioAttributes(attributes).setAcceptsDelayedFocusGain(false).build()
+                    talkFocusRequest = focus
+                    manager.requestAudioFocus(focus)
+                } else {
+                    @Suppress("DEPRECATION")
+                    manager.requestAudioFocus(null, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                }
                 val min = AudioTrack.getMinBufferSize(16000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
-                talkTrack = AudioTrack.Builder().setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()).setAudioFormat(AudioFormat.Builder().setSampleRate(16000).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build()).setBufferSizeInBytes(maxOf(min, 6400)).setTransferMode(AudioTrack.MODE_STREAM).build().apply { play() }
+                talkTrack = AudioTrack.Builder().setAudioAttributes(attributes)
+                    .setAudioFormat(AudioFormat.Builder().setSampleRate(16000).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+                    .setBufferSizeInBytes(maxOf(min * 2, 12800)).setTransferMode(AudioTrack.MODE_STREAM).build().apply {
+                        if (Build.VERSION.SDK_INT >= 23) {
+                            val speaker = manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                            if (speaker != null) setPreferredDevice(speaker)
+                        }
+                        play()
+                    }
             }
-            talkTrack?.write(bytes, 0, bytes.size)
+            val track = talkTrack ?: return
+            var offset = 0
+            while (offset < bytes.size) {
+                val written = track.write(bytes, offset, bytes.size - offset)
+                if (written <= 0) break
+                offset += written
+            }
         } catch (_: Exception) { }
     }
 
@@ -740,7 +777,16 @@ class MainActivity : AppCompatActivity() {
         ambientThread?.interrupt(); ambientThread = null
         stopParentTalk()
         try { talkTrack?.stop() } catch (_: Exception) { }; try { talkTrack?.release() } catch (_: Exception) { }; talkTrack = null
-        latestAudioPcm = null; soundLevel = 0.0
+        talkAudioManager?.let { manager ->
+            try {
+                if (Build.VERSION.SDK_INT >= 31) manager.clearCommunicationDevice()
+                talkFocusRequest?.let { if (Build.VERSION.SDK_INT >= 26) manager.abandonAudioFocusRequest(it) }
+                previousSpeakerphone?.let { @Suppress("DEPRECATION") manager.isSpeakerphoneOn = it }
+                previousAudioMode?.let { manager.mode = it }
+            } catch (_: Exception) { }
+        }
+        talkAudioManager = null; previousAudioMode = null; previousSpeakerphone = null; talkFocusRequest = null
+        latestAudioPcm = null; audioSequence.set(0L); soundLevel = 0.0
         try { cameraServer?.stop() } catch (_: Exception) { }
         cameraServer = null
         if (Build.VERSION.SDK_INT >= 26) {
