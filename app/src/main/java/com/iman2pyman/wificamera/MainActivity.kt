@@ -42,6 +42,7 @@ import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.util.Collections
 import java.util.UUID
+import android.media.MediaRecorder
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -58,6 +59,8 @@ class MainActivity : AppCompatActivity() {
     private var hotspotReservation: Any? = null
     private var fallbackHotspotMode = false
     @Volatile private var sessionToken: String = UUID.randomUUID().toString().replace("-", "")
+    private var soundRecorder: MediaRecorder? = null
+    @Volatile private var soundLevel: Double = 0.0
 
     private var scannedSsid: String? = null
     private var scannedPassword: String? = null
@@ -73,6 +76,9 @@ class MainActivity : AppCompatActivity() {
 
     private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) requestWifiPermissionAndStart() else toast("برای ارسال تصویر، اجازه دوربین لازم است.")
+    }
+    private val audioPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) startSoundMonitor() else toast("اجازه میکروفون داده نشد؛ هشدار صدای محیط غیرفعال است.")
     }
     private val wifiPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) startSenderCamera() else toast("برای ایجاد شبکه محلی، اجازه دستگاه‌های نزدیک لازم است.")
@@ -180,6 +186,7 @@ class MainActivity : AppCompatActivity() {
                 provider.unbindAll()
                 provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, previewUseCase, captureUseCase)
                 startCaptureLoop()
+                if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startSoundMonitor() else audioPermission.launch(Manifest.permission.RECORD_AUDIO)
                 if (Build.VERSION.SDK_INT >= 26) startLocalOnlyHotspot(status)
                 else showManualHotspotFallback(status)
             } catch (e: Exception) {
@@ -291,6 +298,30 @@ class MainActivity : AppCompatActivity() {
         return Bitmap.createBitmap(pixels, 420, 420, Bitmap.Config.RGB_565)
     }
 
+    private fun startSoundMonitor() {
+        if (soundRecorder != null) return
+        try {
+            val file = java.io.File(cacheDir, "ambient-monitor.3gp")
+            val recorder: MediaRecorder = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(this) else MediaRecorder()
+            recorder.setAudioSource(MediaRecorder.AudioSource.MIC)
+            recorder.setOutputFormat(MediaRecorder.OutputFormat.THREE_GPP)
+            recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AMR_NB)
+            recorder.setOutputFile(file.absolutePath)
+            recorder.prepare()
+            recorder.start()
+            soundRecorder = recorder
+            val handler = android.os.Handler(mainLooper)
+            val poll = object : Runnable {
+                override fun run() {
+                    val active = soundRecorder ?: return
+                    try { soundLevel = (active.maxAmplitude.toDouble() / 32767.0).coerceIn(0.0, 1.0) } catch (_: Exception) { soundLevel = 0.0 }
+                    handler.postDelayed(this, 700)
+                }
+            }
+            handler.post(poll)
+        } catch (_: Exception) { soundLevel = 0.0; toast("پایش صدای محیط فعال نشد.") }
+    }
+
     private fun currentBatteryPercent(): Int {
         return try {
             val manager = getSystemService(BATTERY_SERVICE) as android.os.BatteryManager
@@ -306,7 +337,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startHttpServer() {
         if (cameraServer != null) return
-        val server = CameraHttpServer(8080, { latestJpeg }, { latestFrameAt }, { currentBatteryPercent() }, { sessionToken })
+        val server = CameraHttpServer(8080, { latestJpeg }, { latestFrameAt }, { currentBatteryPercent() }, { sessionToken }, { soundLevel })
         server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
         cameraServer = server
     }
@@ -470,6 +501,10 @@ class MainActivity : AppCompatActivity() {
     private fun stopSender() {
         streaming.set(false)
         sessionToken = UUID.randomUUID().toString().replace("-", "")
+        try { soundRecorder?.stop() } catch (_: Exception) { }
+        try { soundRecorder?.release() } catch (_: Exception) { }
+        soundRecorder = null
+        soundLevel = 0.0
         try { cameraServer?.stop() } catch (_: Exception) { }
         cameraServer = null
         if (Build.VERSION.SDK_INT >= 26) {
@@ -498,7 +533,8 @@ private class CameraHttpServer(
     private val frameProvider: () -> ByteArray?,
     private val frameTimeProvider: () -> Long,
     private val batteryProvider: () -> Int,
-    private val tokenProvider: () -> String
+    private val tokenProvider: () -> String,
+    private val soundLevelProvider: () -> Double
 ) : NanoHTTPD(port) {
     override fun serve(session: IHTTPSession): Response {
         val supplied = session.parameters["key"]?.firstOrNull()
@@ -555,7 +591,8 @@ private class CameraHttpServer(
             val ready = frameProvider() != null && age < 5000L
             val message = if (ready) "تصویر زنده برقرار است" else if (frameAt == 0L) "شبکه و سرور وصل‌اند؛ هنوز اولین تصویر دوربین دریافت نشده است." else "گوشی وصل است، اما ارسال تصویر متوقف یا کند شده است."
             val battery = batteryProvider()
-            val json = """{"server":"online","cameraReady":$ready,"frameAgeMs":${if (age == Long.MAX_VALUE) -1 else age},"batteryPercent":$battery,"message":"$message"}"""
+            val sound = soundLevelProvider()
+            val json = """{"server":"online","cameraReady":$ready,"frameAgeMs":${if (age == Long.MAX_VALUE) -1 else age},"batteryPercent":$battery,"soundLevel":$sound,"message":"$message"}"""
             newFixedLengthResponse(Response.Status.OK, "application/json; charset=utf-8", json)
         }
         "/snapshot.jpg" -> {
