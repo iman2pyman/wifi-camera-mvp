@@ -500,6 +500,7 @@ class MainActivity : AppCompatActivity() {
         talkThread?.interrupt(); talkThread = null
     }
 
+    @Suppress("DEPRECATION")
     private fun playTalkAudio(bytes: ByteArray) {
         try {
             if (talkTrack == null) {
@@ -508,7 +509,6 @@ class MainActivity : AppCompatActivity() {
                 previousAudioMode = manager.mode
                 previousSpeakerphone = manager.isSpeakerphoneOn
                 manager.mode = AudioManager.MODE_IN_COMMUNICATION
-                @Suppress("DEPRECATION")
                 manager.isSpeakerphoneOn = true
                 if (Build.VERSION.SDK_INT >= 31) {
                     val speaker = manager.availableCommunicationDevices.firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
@@ -523,7 +523,6 @@ class MainActivity : AppCompatActivity() {
                     talkFocusRequest = focus
                     manager.requestAudioFocus(focus)
                 } else {
-                    @Suppress("DEPRECATION")
                     manager.requestAudioFocus(null, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
                 }
                 val min = AudioTrack.getMinBufferSize(16000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
@@ -788,7 +787,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 if (Build.VERSION.SDK_INT >= 31) manager.clearCommunicationDevice()
                 if (Build.VERSION.SDK_INT >= 26) (talkFocusRequest as? AudioFocusRequest)?.let { manager.abandonAudioFocusRequest(it) }
-                previousSpeakerphone?.let { @Suppress("DEPRECATION") manager.isSpeakerphoneOn = it }
+                if (previousSpeakerphone != null) manager.isSpeakerphoneOn = previousSpeakerphone!!
                 previousAudioMode?.let { manager.mode = it }
             } catch (_: Exception) { }
         }
