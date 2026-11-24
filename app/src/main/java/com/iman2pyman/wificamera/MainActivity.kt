@@ -838,6 +838,7 @@ class MainActivity : AppCompatActivity() {
         @JavascriptInterface fun closeViewer() {
             runOnUiThread {
                 restoreParentSpeakerRoute()
+                restoreImmersiveMode()
                 try { (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager).bindProcessToNetwork(null) } catch (_: Exception) { }
                 showViewer()
             }
@@ -891,6 +892,14 @@ class MainActivity : AppCompatActivity() {
         }
         root.addView(web, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         setContentView(root)
+    }
+
+    private fun restoreImmersiveMode() {
+        previousSystemUiVisibility?.let { oldFlags ->
+            @Suppress("DEPRECATION")
+            window.decorView.systemUiVisibility = oldFlags
+        }
+        previousSystemUiVisibility = null
     }
 
     private fun localIpAddress(): String? {
@@ -960,6 +969,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         restoreParentSpeakerRoute()
+        restoreImmersiveMode()
         stopSender()
         executor.shutdown()
         super.onDestroy()
