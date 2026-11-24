@@ -835,7 +835,16 @@ class MainActivity : AppCompatActivity() {
             }
         }
         @JavascriptInterface fun stop() { runOnUiThread { stopParentTalk() } }
+        @JavascriptInterface fun closeViewer() {
+            runOnUiThread {
+                restoreParentSpeakerRoute()
+                try { (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager).bindProcessToNetwork(null) } catch (_: Exception) { }
+                showViewer()
+            }
+        }
     }
+
+    private var previousSystemUiVisibility: Int? = null
 
     private fun showWebViewer(url: String) {
         val bound = bindProcessToWifiNetwork()
@@ -848,9 +857,22 @@ class MainActivity : AppCompatActivity() {
             @Suppress("DEPRECATION")
             run { manager.isSpeakerphoneOn = true }
         } catch (_: Exception) { }
-        root = baseLayout()
-        root.addView(text("تصویر زنده کودک", 22f))
-        root.addView(text(if (bound) "اتصال از مسیر Wi-Fi برقرار می‌شود." else "شبکه Wi-Fi پیدا نشد؛ مطمئن شو گوشی گیرنده به شبکه فرستنده وصل است.", 13f))
+        previousSystemUiVisibility = window.decorView.systemUiVisibility
+        @Suppress("DEPRECATION")
+        window.decorView.systemUiVisibility = (
+            android.view.View.SYSTEM_UI_FLAG_FULLSCREEN or
+            android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+            android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or
+            android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+            android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or
+            android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        )
+        root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 0, 0, 0)
+            setBackgroundColor(Color.BLACK)
+            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        }
         val web = WebView(this).apply {
             addJavascriptInterface(TalkBridge(), "AndroidTalk")
             settings.javaScriptEnabled = true
@@ -868,12 +890,6 @@ class MainActivity : AppCompatActivity() {
             loadUrl("$base/viewer?key=${Uri.encode(key)}")
         }
         root.addView(web, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        root.addView(button("قطع اتصال") {
-            web.stopLoading()
-            restoreParentSpeakerRoute()
-            try { (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager).bindProcessToNetwork(null) } catch (_: Exception) { }
-            showViewer()
-        })
         setContentView(root)
     }
 
@@ -968,42 +984,47 @@ private class CameraHttpServer(
         "/viewer" -> {
             val pageToken = tokenProvider()
             val html = """<!doctype html><html lang="fa" dir="rtl"><head><meta name="viewport" content="width=device-width,initial-scale=1"><meta charset="utf-8"><style>
-            *{box-sizing:border-box}body{margin:0;background:linear-gradient(145deg,#e3f5ff 0%,#f7f4ff 54%,#fff0f5 100%);color:#263e59;font-family:Arial,sans-serif;padding:14px}
-            header{text-align:center;font-size:25px;font-weight:900;padding:12px 8px 16px;color:#167db7}
-            #connection{background:rgba(255,255,255,.96);border:1px solid #dcecf7;border-radius:24px;padding:14px;margin:8px 0 14px;box-shadow:0 7px 22px #477da51c}
-            .grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.item{background:#f0f8fd;border:1px solid #e2eff8;border-radius:17px;padding:13px 8px;text-align:center;font-size:13px;font-weight:700}
-            .value{display:block;font-size:17px;font-weight:900;margin-top:7px}.ok{color:#16865b}.warn{color:#bd7b16}.bad{color:#c43d58}
-            #state{padding:12px;text-align:center;font-size:14px;font-weight:700}#stage{background:#152b40;border:3px solid white;border-radius:23px;min-height:48vh;display:flex;align-items:center;justify-content:center;overflow:hidden;box-shadow:0 8px 24px #25445c25}
-            #live{width:100%;max-height:66vh;object-fit:contain;transition:filter .2s}#hint{text-align:center;font-size:12px;color:#60758b;padding:12px;line-height:1.9}
-            .controls{display:flex;gap:9px;flex-wrap:wrap;margin:11px 0}.controls button{flex:1;min-width:42%;border:0;border-radius:16px;padding:14px 10px;background:linear-gradient(135deg,#ed86a8,#d95e89);box-shadow:0 4px 10px #d95e8930;color:#fff;font-weight:800;font-size:14px}
-            .controls button:active{transform:scale(.98)}#alert{display:none;background:#fff0f3;border:1px solid #ffd1df;color:#bd3155;border-radius:16px;padding:13px;text-align:center;font-weight:800;margin:10px 0}
-            </style></head><body><header>👶 دوربین کنترل کودک</header>
-            <section id="connection"><div class="grid">
-            <div class="item">اتصال گوشی<span id="net" class="value warn">در حال بررسی…</span></div>
-            <div class="item">باتری گوشی کودک<span id="battery" class="value">--</span></div>
-            <div class="item">وضعیت دوربین<span id="camera" class="value warn">در انتظار</span></div>
-            <div class="item">تازگی تصویر<span id="fresh" class="value">--</span></div>
-            </div><div id="state">در حال بررسی ارتباط با گوشی فرستنده…</div></section>
-            <div id="alert">⚠️ حرکت قابل توجهی در تصویر تشخیص داده شد</div>
+            *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000;color:#fff;font-family:Arial,sans-serif;padding:0}
+            #stage{position:fixed;inset:0;background:#000;display:flex;align-items:center;justify-content:center;overflow:hidden}
+            #live{width:100%;height:100%;max-height:none;object-fit:contain;transition:filter .2s}
+            #gear{position:fixed;z-index:20;top:14px;right:14px;width:46px;height:46px;border:1px solid #ffffff45;border-radius:50%;background:#18253655;color:#fff;font-size:23px;opacity:.28;backdrop-filter:blur(5px)}
+            #gear:active{opacity:.9}#panel{display:none;position:fixed;z-index:19;right:12px;left:12px;bottom:14px;max-height:72vh;overflow:auto;padding:14px;border:1px solid #ffffff35;border-radius:22px;background:rgba(16,29,44,.88);backdrop-filter:blur(14px);box-shadow:0 8px 30px #0008}
+            #panel.open{display:block}.controls{display:flex;gap:9px;flex-wrap:wrap;margin:7px 0}.controls button{flex:1;min-width:42%;border:0;border-radius:15px;padding:13px 9px;background:linear-gradient(135deg,#ed86a8,#d95e89);color:#fff;font-weight:800;font-size:14px}
+            .controls button:active{transform:scale(.98)}#alert{display:none;position:fixed;z-index:10;top:12px;left:12px;right:68px;background:#8c2448dd;border:1px solid #ffd1df;color:#fff;border-radius:14px;padding:10px;text-align:center;font-weight:800}
+            #status{position:fixed;z-index:8;left:12px;bottom:12px;padding:6px 10px;border-radius:12px;background:#14283a88;color:#fff;font-size:11px;opacity:.65}
+            #hint{font-size:11px;color:#e5edf5;text-align:center;padding:5px}
+            </style></head><body>
             <div id="stage"><img id="live" style="display:none" alt="تصویر زنده کودک"></div>
+            <div id="alert">⚠️ حرکت قابل توجهی در تصویر تشخیص داده شد</div>
+            <div id="status">در حال اتصال…</div>
+            <button id="gear" aria-label="تنظیمات">⚙</button>
+            <section id="panel">
             <div class="controls"><button id="night">🌙 حالت دید در شب: خاموش</button><button id="motion">🔔 هشدار حرکت: روشن</button></div>
-            <div class="controls"><button id="sound">🔊 هشدار صدای بلند / احتمال گریه: روشن</button><button id="listen">👂 شنیدن صدای محیط: خاموش</button></div>
-            <div class="controls"><button id="talk">🎙️ صحبت با کودک</button></div>
-            <div id="hint">تشخیص حرکت تصویری و صدای بلند به‌صورت محلی انجام می‌شود؛ این هشدار تشخیص پزشکی یا قطعی گریه نیست.<br>اتصال محلی امن · بدون نیاز به اینترنت</div>
+            <div class="controls"><button id="sound">🔊 هشدار صدای بلند / احتمال گریه: روشن</button><button id="listen">👂 شنیدن صدای کودک: خاموش</button></div>
+            <div class="controls"><button id="talk">🎙️ صحبت با کودک</button><button id="picture">🖼️ پنهان‌کردن تصویر</button></div>
+            <div class="controls"><button id="exit">⏻ قطع اتصال و بازگشت</button><button id="closePanel">بستن تنظیمات</button></div>
+            <div id="hint">کنترل‌ها روی تصویر نمایش داده می‌شوند و پخش زنده هنگام باز بودن این پنل ادامه دارد.</div>
+            </section>
             <script>
             const key='__KEY__',img=document.getElementById('live'),state=document.getElementById('state');
             const net=document.getElementById('net'),battery=document.getElementById('battery'),camera=document.getElementById('camera'),fresh=document.getElementById('fresh'),alertBox=document.getElementById('alert');
-            let ready=false,night=false,motionOn=true,soundOn=true,previous=null,lastAlert=0,audioSeq=0,nextAudioTime=0;
+            let ready=false,night=false,motionOn=true,soundOn=true,previous=null,lastAlert=0,audioSeq=0,nextAudioTime=0,pictureHidden=false;
             function label(el,value,kind){el.textContent=value;el.className='value '+kind}
+            const panel=document.getElementById('panel'),gear=document.getElementById('gear'),status=document.getElementById('status');
+            gear.onclick=()=>panel.classList.toggle('open');
+            document.getElementById('closePanel').onclick=()=>panel.classList.remove('open');
+            document.getElementById('exit').onclick=()=>{try{if(talking)window.AndroidTalk.stop();}catch(e){}try{window.AndroidTalk.closeViewer();}catch(e){}};
+            document.getElementById('picture').onclick=()=>{pictureHidden=!pictureHidden;img.style.visibility=pictureHidden?'hidden':'visible';document.getElementById('picture').textContent=pictureHidden?'🖼️ نمایش تصویر':'🖼️ پنهان‌کردن تصویر';};
+            document.getElementById('status').textContent='در حال اتصال…';
             function url(path){return path+'?key='+encodeURIComponent(key)+'&t='+Date.now()}
             document.getElementById('night').onclick=()=>{night=!night;img.style.filter=night?'grayscale(1) brightness(1.65) contrast(1.15)':'none';document.getElementById('night').textContent='🌙 حالت دید در شب: '+(night?'روشن':'خاموش')};
             document.getElementById('motion').onclick=()=>{motionOn=!motionOn;document.getElementById('motion').textContent='🔔 هشدار حرکت: '+(motionOn?'روشن':'خاموش')};
             document.getElementById('sound').onclick=()=>{soundOn=!soundOn;document.getElementById('sound').textContent='🔊 هشدار صدای بلند / احتمال گریه: '+(soundOn?'روشن':'خاموش')};
             async function check(){try{const r=await fetch(url('/status'),{cache:'no-store'});if(!r.ok)throw Error('server');const s=await r.json();label(net,'متصل','ok');label(battery,s.batteryPercent>=0?s.batteryPercent+'٪':'نامشخص',s.batteryPercent>=20?'ok':'warn');
-            if(s.cameraReady){label(camera,'فعال','ok');const age=s.frameAgeMs||0;label(fresh,age<1500?'روان':age<3000?'قابل قبول':'با تأخیر',age<3000?'ok':'warn');state.textContent='تصویر زنده در حال دریافت است';state.className='ok';img.style.display='block';if(!ready){img.src=url('/stream');ready=true;}}
-            else{label(camera,'آماده نیست','warn');label(fresh,'بدون تصویر','warn');state.textContent=s.message||'منتظر آماده‌شدن دوربین…';state.className='warn';img.style.display='none';ready=false;}
+            if(s.cameraReady){label(camera,'فعال','ok');const age=s.frameAgeMs||0;label(fresh,age<1500?'روان':age<3000?'قابل قبول':'با تأخیر',age<3000?'ok':'warn');status.textContent='● تصویر زنده';status.style.color='#9ff0c3';img.style.display='block';img.style.visibility=pictureHidden?'hidden':'visible';if(!ready){img.src=url('/stream');ready=true;}}
+            else{label(camera,'آماده نیست','warn');label(fresh,'بدون تصویر','warn');status.textContent='در انتظار تصویر…';status.style.color='#ffd28a';img.style.display='none';ready=false;}
             if(soundOn&&s.soundLevel>0.72&&Date.now()-lastAlert>12000){lastAlert=Date.now();alertBox.textContent='🔊 صدای بلند در محیط کودک تشخیص داده شد';alertBox.style.display='block';}
-            }catch(e){label(net,'قطع ارتباط','bad');label(camera,'نامشخص','bad');label(fresh,'دریافت نمی‌شود','bad');state.textContent='ارتباط با گوشی فرستنده قطع است؛ Wi-Fi و برنامه را بررسی کنید.';state.className='bad';img.style.display='none';ready=false;label(battery,'در دسترس نیست','bad');}}
+            }catch(e){label(net,'قطع ارتباط','bad');label(camera,'نامشخص','bad');label(fresh,'دریافت نمی‌شود','bad');status.textContent='ارتباط قطع است';status.style.color='#ff9eae';img.style.display='none';ready=false;label(battery,'در دسترس نیست','bad');}}
             async function detectMotion(){if(!ready||!motionOn||!img.complete||!img.naturalWidth)return;try{const c=document.createElement('canvas'),w=48,h=36;c.width=w;c.height=h;const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(img,0,0,w,h);const data=x.getImageData(0,0,w,h).data;let diff=0;if(previous){for(let i=0;i<data.length;i+=4)diff+=Math.abs(data[i]-previous[i])+Math.abs(data[i+1]-previous[i+1])+Math.abs(data[i+2]-previous[i+2]);const ratio=diff/(w*h*3*255);if(ratio>0.13&&Date.now()-lastAlert>12000){lastAlert=Date.now();alertBox.textContent='⚠️ حرکت قابل توجهی در تصویر تشخیص داده شد';alertBox.style.display='block';if(navigator.vibrate)navigator.vibrate([180,80,180]);}}previous=data;}catch(e){}}
             let listening=false,talking=false,audioContext=null,ambientGain=null,ambientLoopRunning=false;
             document.getElementById('listen').onclick=async()=>{listening=!listening;document.getElementById('listen').textContent='👂 شنیدن صدای محیط: '+(listening?'روشن':'خاموش');if(listening){try{audioContext=new (window.AudioContext||window.webkitAudioContext)({sampleRate:16000});ambientGain=audioContext.createGain();ambientGain.gain.value=1.35;ambientGain.connect(audioContext.destination);await audioContext.resume();nextAudioTime=audioContext.currentTime;playAmbient();}catch(e){listening=false;alert('پخش صدا در این گوشی پشتیبانی نشد.');}}else if(audioContext){await audioContext.close();audioContext=null;ambientGain=null;nextAudioTime=0;}};
