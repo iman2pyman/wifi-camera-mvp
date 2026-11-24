@@ -446,7 +446,7 @@ class MainActivity : AppCompatActivity() {
         }
         val passwordInput = EditText(this).apply {
             hint = "رمز هات‌اسپات"
-            singleLine = true
+            setSingleLine(true)
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
         }
         root.addView(ssidInput, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
