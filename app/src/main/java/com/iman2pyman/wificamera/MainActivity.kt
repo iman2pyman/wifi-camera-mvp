@@ -960,9 +960,9 @@ class MainActivity : AppCompatActivity() {
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()
 
     override fun onDestroy() {
+        // The foreground sender service owns the camera session and may outlive this Activity.
         restoreParentSpeakerRoute()
         restoreImmersiveMode()
-        stopSender()
         executor.shutdown()
         super.onDestroy()
     }
