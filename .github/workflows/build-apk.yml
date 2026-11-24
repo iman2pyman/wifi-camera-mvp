@@ -2,7 +2,7 @@ name: Build WiFi Camera APK
 
 on:
   push:
-    branches: [main, 'feature/parent-dashboard', 'fix/continuous-media-talkback']
+    branches: [main, 'feature/parent-dashboard', 'fix/continuous-media-talkback', 'hotfix/restore-live-video-baseline']
   workflow_dispatch:
 
 permissions:
