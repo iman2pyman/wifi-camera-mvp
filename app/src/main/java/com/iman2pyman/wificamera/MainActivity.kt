@@ -441,7 +441,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(text("۱) هات‌اسپات گوشی کنار کودک را روشن کن.\n۲) نام و رمز هات‌اسپات را در کادرهای زیر وارد کن.\n۳) سپس دکمه راه‌اندازی را بزن تا QR اتصال ساخته شود.", 13f))
         val ssidInput = EditText(this).apply {
             hint = "نام هات‌اسپات (SSID)"
-            singleLine = true
+            setSingleLine(true)
             inputType = InputType.TYPE_CLASS_TEXT
         }
         val passwordInput = EditText(this).apply {
