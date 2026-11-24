@@ -564,6 +564,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     @Suppress("DEPRECATION")
+    @Synchronized
     private fun playTalkAudio(bytes: ByteArray) {
         try {
             if (talkTrack == null) {
@@ -585,28 +586,33 @@ class MainActivity : AppCompatActivity() {
                         .setAudioAttributes(attributes).setAcceptsDelayedFocusGain(false).build()
                     talkFocusRequest = focus
                     manager.requestAudioFocus(focus)
-                } else {
-                    manager.requestAudioFocus(null, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
-                }
+                } else manager.requestAudioFocus(null, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
                 val min = AudioTrack.getMinBufferSize(16000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
-                talkTrack = AudioTrack.Builder().setAudioAttributes(attributes)
+                if (min <= 0) throw IllegalStateException("قالب پخش صدای والد پشتیبانی نمی‌شود")
+                val track = AudioTrack.Builder().setAudioAttributes(attributes)
                     .setAudioFormat(AudioFormat.Builder().setSampleRate(16000).setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
-                    .setBufferSizeInBytes(maxOf(min * 2, 12800)).setTransferMode(AudioTrack.MODE_STREAM).build().apply {
-                        if (Build.VERSION.SDK_INT >= 23) {
-                            val speaker = manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
-                            if (speaker != null) setPreferredDevice(speaker)
-                        }
-                        play()
-                    }
+                    .setBufferSizeInBytes(maxOf(min * 3, 19200)).setTransferMode(AudioTrack.MODE_STREAM).build()
+                if (track.state != AudioTrack.STATE_INITIALIZED) {
+                    track.release()
+                    throw IllegalStateException("بلندگوی گوشی کودک آماده نیست")
+                }
+                if (Build.VERSION.SDK_INT >= 23) {
+                    val speaker = manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.type == android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+                    if (speaker != null) track.setPreferredDevice(speaker)
+                }
+                track.play()
+                talkTrack = track
             }
             val track = talkTrack ?: return
             var offset = 0
             while (offset < bytes.size) {
-                val written = track.write(bytes, offset, bytes.size - offset)
+                val written = track.write(bytes, offset, bytes.size - offset, AudioTrack.WRITE_BLOCKING)
                 if (written <= 0) break
                 offset += written
             }
-        } catch (_: Exception) { }
+        } catch (e: Exception) {
+            android.util.Log.e("BabyMonitorAudio", "Parent talk playback failed", e)
+        }
     }
 
     private fun currentBatteryPercent(): Int {
@@ -930,9 +936,9 @@ private class CameraHttpServer(
             if(soundOn&&s.soundLevel>0.72&&Date.now()-lastAlert>12000){lastAlert=Date.now();alertBox.textContent='🔊 صدای بلند در محیط کودک تشخیص داده شد';alertBox.style.display='block';}
             }catch(e){label(net,'قطع ارتباط','bad');label(camera,'نامشخص','bad');label(fresh,'دریافت نمی‌شود','bad');state.textContent='ارتباط با گوشی فرستنده قطع است؛ Wi-Fi و برنامه را بررسی کنید.';state.className='bad';img.style.display='none';ready=false;label(battery,'در دسترس نیست','bad');}}
             async function detectMotion(){if(!ready||!motionOn||!img.complete||!img.naturalWidth)return;try{const c=document.createElement('canvas'),w=48,h=36;c.width=w;c.height=h;const x=c.getContext('2d',{willReadFrequently:true});x.drawImage(img,0,0,w,h);const data=x.getImageData(0,0,w,h).data;let diff=0;if(previous){for(let i=0;i<data.length;i+=4)diff+=Math.abs(data[i]-previous[i])+Math.abs(data[i+1]-previous[i+1])+Math.abs(data[i+2]-previous[i+2]);const ratio=diff/(w*h*3*255);if(ratio>0.13&&Date.now()-lastAlert>12000){lastAlert=Date.now();alertBox.textContent='⚠️ حرکت قابل توجهی در تصویر تشخیص داده شد';alertBox.style.display='block';if(navigator.vibrate)navigator.vibrate([180,80,180]);}}previous=data;}catch(e){}}
-            let listening=false,talking=false,audioContext=null,ambientLoopRunning=false;
-            document.getElementById('listen').onclick=async()=>{listening=!listening;document.getElementById('listen').textContent='👂 شنیدن صدای محیط: '+(listening?'روشن':'خاموش');if(listening){try{audioContext=new (window.AudioContext||window.webkitAudioContext)({sampleRate:16000});await audioContext.resume();playAmbient();}catch(e){listening=false;alert('پخش صدا در این گوشی پشتیبانی نشد.');}}else if(audioContext){await audioContext.close();audioContext=null;}};
-            async function playAmbient(){if(ambientLoopRunning)return;ambientLoopRunning=true;while(listening&&audioContext){try{const r=await fetch(url('/ambient')+'&since='+audioSeq,{cache:'no-store'});if(r.status===204)continue;if(!r.ok)throw Error('audio');const seq=Number(r.headers.get('X-Audio-Sequence')||audioSeq);if(seq<=audioSeq)continue;audioSeq=seq;const b=await r.arrayBuffer();if(!b.byteLength)continue;const pcm=new Int16Array(b),buf=audioContext.createBuffer(1,pcm.length,16000),ch=buf.getChannelData(0);for(let i=0;i<pcm.length;i++)ch[i]=pcm[i]/32768;const src=audioContext.createBufferSource();src.buffer=buf;src.connect(audioContext.destination);const now=audioContext.currentTime;nextAudioTime=Math.max(nextAudioTime,now+0.025);src.start(nextAudioTime);nextAudioTime+=buf.duration;}catch(e){await new Promise(resolve=>setTimeout(resolve,250));}}ambientLoopRunning=false;}
+            let listening=false,talking=false,audioContext=null,ambientGain=null,ambientLoopRunning=false;
+            document.getElementById('listen').onclick=async()=>{listening=!listening;document.getElementById('listen').textContent='👂 شنیدن صدای محیط: '+(listening?'روشن':'خاموش');if(listening){try{audioContext=new (window.AudioContext||window.webkitAudioContext)({sampleRate:16000});ambientGain=audioContext.createGain();ambientGain.gain.value=1.35;ambientGain.connect(audioContext.destination);await audioContext.resume();nextAudioTime=audioContext.currentTime;playAmbient();}catch(e){listening=false;alert('پخش صدا در این گوشی پشتیبانی نشد.');}}else if(audioContext){await audioContext.close();audioContext=null;ambientGain=null;nextAudioTime=0;}};
+            async function playAmbient(){if(ambientLoopRunning)return;ambientLoopRunning=true;while(listening&&audioContext){try{const r=await fetch(url('/ambient')+'&since='+audioSeq,{cache:'no-store'});if(r.status===204){await new Promise(resolve=>setTimeout(resolve,35));continue;}if(!r.ok)throw Error('audio');const seq=Number(r.headers.get('X-Audio-Sequence')||audioSeq);if(seq<=audioSeq)continue;audioSeq=seq;const b=await r.arrayBuffer();if(!b.byteLength)continue;const pcm=new Int16Array(b,0,Math.floor(b.byteLength/2)),buf=audioContext.createBuffer(1,pcm.length,16000),ch=buf.getChannelData(0);for(let i=0;i<pcm.length;i++)ch[i]=pcm[i]/32768;const src=audioContext.createBufferSource();src.buffer=buf;src.connect(ambientGain||audioContext.destination);const now=audioContext.currentTime;nextAudioTime=Math.max(nextAudioTime,now+0.02);src.start(nextAudioTime);nextAudioTime+=buf.duration;}catch(e){await new Promise(resolve=>setTimeout(resolve,180));}}ambientLoopRunning=false;}
             document.getElementById('talk').onclick=()=>{talking=!talking;document.getElementById('talk').textContent=talking?'⏹ توقف مکالمه':'🎙️ صحبت با کودک';if(talking){try{window.AndroidTalk.start(window.location.protocol+'//'+window.location.host,key);}catch(e){talking=false;alert('فعال‌سازی میکروفون ممکن نشد.');}}else{try{window.AndroidTalk.stop();}catch(e){}}};
             img.onerror=()=>{if(ready)setTimeout(()=>{if(ready)img.src=url('/stream')},900)};check();setInterval(check,1500);setInterval(detectMotion,1200);
             </script></body></html>""".replace("__KEY__", pageToken)
