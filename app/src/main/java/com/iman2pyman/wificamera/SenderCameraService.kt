@@ -148,7 +148,7 @@ class SenderCameraService : LifecycleService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         if (intent?.getBooleanExtra("enable_audio", false) == true &&
-            Build.VERSION.SDK_INT >= 30 &&
+            Build.VERSION.SDK_INT >= 29 &&
             ContextCompat.checkSelfPermission(this, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
             try {
                 val notification = NotificationCompat.Builder(this, CHANNEL_ID)
