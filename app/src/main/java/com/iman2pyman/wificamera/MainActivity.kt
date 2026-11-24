@@ -366,7 +366,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     @RequiresApi(26)
-    private fun startLocalOnlyHotspot    private fun startLocalOnlyHotspot(status: TextView) {
+    private fun startLocalOnlyHotspot(status: TextView) {
         val wifi = applicationContext.getSystemService(WIFI_SERVICE) as WifiManager
         val callback = object : WifiManager.LocalOnlyHotspotCallback() {
             override fun onStarted(reservation: WifiManager.LocalOnlyHotspotReservation) {
