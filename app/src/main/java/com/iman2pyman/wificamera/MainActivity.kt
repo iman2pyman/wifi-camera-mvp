@@ -436,23 +436,51 @@ class MainActivity : AppCompatActivity() {
     }
     private fun showManualHotspotFallback(status: TextView) {
         fallbackHotspotMode = true
-        status.text = "این گوشی از هات‌اسپات محلی برنامه‌ای پشتیبانی نکرد. هات‌اسپات گوشی را دستی روشن کن."
-        val settingsButton = button("بازکردن تنظیمات هات‌اسپات") {
+        status.text = "این گوشی ایجاد خودکار شبکه را پشتیبانی نکرد؛ هات‌اسپات گوشی را دستی روشن کن."
+        root.addView(text("اتصال دستی Wi-Fi", 18f))
+        root.addView(text("۱) هات‌اسپات گوشی کنار کودک را روشن کن.\n۲) نام و رمز هات‌اسپات را در کادرهای زیر وارد کن.\n۳) سپس دکمه راه‌اندازی را بزن تا QR اتصال ساخته شود.", 13f))
+        val ssidInput = EditText(this).apply {
+            hint = "نام هات‌اسپات (SSID)"
+            singleLine = true
+            inputType = InputType.TYPE_CLASS_TEXT
+        }
+        val passwordInput = EditText(this).apply {
+            hint = "رمز هات‌اسپات"
+            singleLine = true
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+        root.addView(ssidInput, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        root.addView(passwordInput, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        root.addView(button("بازکردن تنظیمات هات‌اسپات") {
             try {
                 startActivity(android.content.Intent("android.settings.TETHER_SETTINGS"))
             } catch (_: Exception) {
                 startActivity(android.content.Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS))
             }
-        }
-        root.addView(settingsButton)
-        root.addView(button("هات‌اسپات روشن شد؛ راه‌اندازی سرور") {
+        })
+        root.addView(button("هات‌اسپات روشن شد؛ ساخت QR اتصال") {
+            val ssid = ssidInput.text?.toString()?.trim().orEmpty()
+            val password = passwordInput.text?.toString().orEmpty()
+            if (ssid.isBlank()) {
+                toast("ابتدا نام هات‌اسپات را وارد کن.")
+                return@button
+            }
+            if (password.isNotBlank() && password.length < 8) {
+                toast("رمز هات‌اسپات باید حداقل ۸ نویسه باشد.")
+                return@button
+            }
             try {
                 startHttpServer()
                 val ip = localIpAddress()
-                status.text = if (ip == null) "سرور روشن شد اما IP پیدا نشد. مطمئن شو هات‌اسپات فعال است."
-                    else "گوشی دوم را به هات‌اسپات وصل کن و این نشانی امن را وارد کن:\nhttp://$ip:8080?key=$sessionToken"
+                if (ip.isNullOrBlank()) {
+                    status.text = "سرور روشن شد، اما نشانی شبکه پیدا نشد. مطمئن شو هات‌اسپات روشن است و دوباره تلاش کن."
+                    toast("نشانی شبکه پیدا نشد؛ QR هنوز ساخته نشد.")
+                } else {
+                    showHotspotDetails(ssid, password, ip)
+                }
             } catch (e: Exception) {
-                toast("راه‌اندازی سرور ناموفق بود: ${e.message}")
+                status.text = "راه‌اندازی سرور ناموفق بود: ${e.message}"
+                toast("راه‌اندازی سرور ناموفق بود.")
             }
         })
     }
