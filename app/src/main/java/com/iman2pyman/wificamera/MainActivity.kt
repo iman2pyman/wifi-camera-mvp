@@ -84,6 +84,10 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var latestAudioPacket: Pair<Long, ByteArray>? = null
     @Volatile private var soundLevel: Double = 0.0
     @Volatile private var pendingParentTalk: Pair<String, String>? = null
+    @Volatile private var parentTalkEnabled: Boolean = false
+    private var parentAudioManager: AudioManager? = null
+    private var previousParentAudioMode: Int? = null
+    private var previousParentSpeakerphone: Boolean? = null
 
     private var scannedSsid: String? = null
     private var scannedPassword: String? = null
@@ -326,6 +330,13 @@ class MainActivity : AppCompatActivity() {
         statusCard.addView(text("وضعیت اتصال", 16f))
         statusCard.addView(status)
         root.addView(statusCard, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { bottomMargin = dp(10) })
+        val parentTalkButton = button("🔊 فعال‌سازی صدای والد") {
+            parentTalkEnabled = !parentTalkEnabled
+            parentTalkButtonText(parentTalkEnabled)
+            toast(if (parentTalkEnabled) "صدای والد فعال شد؛ صدای گوشی والد از بلندگوی این گوشی پخش می‌شود." else "صدای والد غیرفعال شد.")
+        }
+        parentTalkButton.tag = "parent-talk-control"
+        root.addView(parentTalkButton)
         root.addView(button("⏹  توقف ارسال و بازگشت") { stopSender(); showHome() })
         setContentView(scroll)
 
@@ -427,7 +438,7 @@ class MainActivity : AppCompatActivity() {
         val qr = ImageView(this)
         val endpoint = if (ip != null) "http://$ip:8080?key=$sessionToken" else ""
         val qrData = "babymonitor://connect?ssid=${Uri.encode(ssid)}&password=${Uri.encode(password)}&url=${Uri.encode(endpoint)}"
-        try { qr.setImageBitmap(makeQr(qrData)); root.addView(qr, LinearLayout.LayoutParams(190, 190).apply { gravity = Gravity.CENTER }) } catch (_: Exception) { }
+        try { qr.setImageBitmap(makeQr(qrData)); root.addView(qr, LinearLayout.LayoutParams(dp(280), dp(280)).apply { gravity = Gravity.CENTER; topMargin = dp(8); bottomMargin = dp(8) }) } catch (_: Exception) { }
         root.addView(text("نام شبکه: $ssid", 14f))
         root.addView(text(if (password.isBlank()) "رمز: بدون رمز" else "رمز شبکه: $password", 14f))
         root.addView(text(if (ip != null) "نشانی تصویر: http://$ip:8080" else "شبکه فعال است؛ در حال شناسایی نشانی محلی…", 13f))
@@ -487,12 +498,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun makeQr(value: String): Bitmap {
         val hints = mapOf(EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M)
-        val matrix = MultiFormatWriter().encode(value, BarcodeFormat.QR_CODE, 420, 420, hints)
-        val pixels = IntArray(420 * 420)
-        for (y in 0 until 420) for (x in 0 until 420) {
-            pixels[y * 420 + x] = if (matrix[x, y]) Color.BLACK else Color.WHITE
+        val matrix = MultiFormatWriter().encode(value, BarcodeFormat.QR_CODE, 600, 600, hints)
+        val pixels = IntArray(600 * 600)
+        for (y in 0 until 600) for (x in 0 until 600) {
+            pixels[y * 600 + x] = if (matrix[x, y]) Color.BLACK else Color.WHITE
         }
-        return Bitmap.createBitmap(pixels, 420, 420, Bitmap.Config.RGB_565)
+        return Bitmap.createBitmap(pixels, 600, 600, Bitmap.Config.RGB_565)
     }
 
     private fun startSoundMonitor() {
@@ -658,7 +669,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startHttpServer() {
         if (cameraServer != null) return
-        val server = CameraHttpServer(8080, { latestJpeg }, { latestFrameAt }, { currentBatteryPercent() }, { sessionToken }, { soundLevel }, { latestAudioPacket }, { bytes -> playTalkAudio(bytes) })
+        val server = CameraHttpServer(8080, { latestJpeg }, { latestFrameAt }, { currentBatteryPercent() }, { sessionToken }, { soundLevel }, { latestAudioPacket }, { bytes -> if (parentTalkEnabled) playTalkAudio(bytes) })
         server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
         cameraServer = server
     }
@@ -828,6 +839,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun showWebViewer(url: String) {
         val bound = bindProcessToWifiNetwork()
+        try {
+            val manager = getSystemService(AUDIO_SERVICE) as AudioManager
+            parentAudioManager = manager
+            previousParentAudioMode = manager.mode
+            previousParentSpeakerphone = manager.isSpeakerphoneOn
+            manager.mode = AudioManager.MODE_NORMAL
+            @Suppress("DEPRECATION")
+            run { manager.isSpeakerphoneOn = true }
+        } catch (_: Exception) { }
         root = baseLayout()
         root.addView(text("تصویر زنده کودک", 22f))
         root.addView(text(if (bound) "اتصال از مسیر Wi-Fi برقرار می‌شود." else "شبکه Wi-Fi پیدا نشد؛ مطمئن شو گوشی گیرنده به شبکه فرستنده وصل است.", 13f))
@@ -850,6 +870,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(web, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
         root.addView(button("قطع اتصال") {
             web.stopLoading()
+            restoreParentSpeakerRoute()
             try { (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager).bindProcessToNetwork(null) } catch (_: Exception) { }
             showViewer()
         })
@@ -876,6 +897,7 @@ class MainActivity : AppCompatActivity() {
         try { ambient?.stop() } catch (_: Exception) { }; try { ambient?.release() } catch (_: Exception) { }
         ambientThread?.interrupt(); ambientThread = null
         stopParentTalk()
+        parentTalkEnabled = false
         try { talkTrack?.stop() } catch (_: Exception) { }; try { talkTrack?.release() } catch (_: Exception) { }; talkTrack = null
         talkAudioManager?.let { manager ->
             try {
@@ -900,9 +922,28 @@ class MainActivity : AppCompatActivity() {
         fallbackHotspotMode = false
     }
 
+    private fun parentTalkButtonText(enabled: Boolean) {
+        val button = root.findViewWithTag<Button>("parent-talk-control") ?: return
+        button.text = if (enabled) "🔇 قطع صدای والد" else "🔊 فعال‌سازی صدای والد"
+    }
+
+    private fun restoreParentSpeakerRoute() {
+        try {
+            parentAudioManager?.let { manager ->
+                @Suppress("DEPRECATION")
+                run { if (previousParentSpeakerphone != null) manager.isSpeakerphoneOn = previousParentSpeakerphone!! }
+                previousParentAudioMode?.let { manager.mode = it }
+            }
+        } catch (_: Exception) { }
+        parentAudioManager = null
+        previousParentAudioMode = null
+        previousParentSpeakerphone = null
+    }
+
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()
 
     override fun onDestroy() {
+        restoreParentSpeakerRoute()
         stopSender()
         executor.shutdown()
         super.onDestroy()
