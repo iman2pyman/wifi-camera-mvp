@@ -1004,6 +1004,7 @@ private class CameraHttpServer(
             #status{position:fixed;z-index:8;left:12px;bottom:12px;padding:6px 10px;border-radius:12px;background:#14283a88;color:#fff;font-size:11px;opacity:.65}
             #hint{font-size:11px;color:#e5edf5;text-align:center;padding:5px}
             </style></head><body>
+            <div style="display:none"><span id="net"></span><span id="battery"></span><span id="camera"></span><span id="fresh"></span><span id="state"></span></div>
             <div id="stage"><img id="live" style="display:none" alt="تصویر زنده کودک"></div>
             <div id="alert">⚠️ حرکت قابل توجهی در تصویر تشخیص داده شد</div>
             <div id="status">در حال اتصال…</div>
