@@ -11,8 +11,8 @@ android {
         applicationId = "com.iman2pyman.wificamera"
         minSdk = 23
         targetSdk = 35
-        versionCode = 9
-        versionName = "1.5.2"
+        versionCode = 10
+        versionName = "1.5.3"
     }
 
     buildTypes {
