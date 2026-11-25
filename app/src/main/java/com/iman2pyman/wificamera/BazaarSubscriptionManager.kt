@@ -13,7 +13,8 @@ import ir.cafebazaar.poolakey.request.PurchaseRequest
 class BazaarSubscriptionManager(
     private val activity: AppCompatActivity,
     private val onStatus: (Boolean, String) -> Unit,
-    private val onPrices: (String) -> Unit
+    private val onPrices: (String) -> Unit,
+    private val onProducts: (Boolean, Boolean) -> Unit
 ) {
     private val payment = Payment(
         context = activity,
@@ -25,6 +26,8 @@ class BazaarSubscriptionManager(
 
     private var connection: Connection? = null
     @Volatile private var connected = false
+    @Volatile private var annualProductAvailable = false
+    @Volatile private var trialProductAvailable = false
 
     fun connect() {
         if (connection != null) return
@@ -70,22 +73,39 @@ class BazaarSubscriptionManager(
      * Fetch subscription prices from Cafe Bazaar; never hardcode product prices.
      */
     private fun refreshSubscriptionPrices() {
-        if (!connected) return
+        if (!connected) {
+            annualProductAvailable = false
+            trialProductAvailable = false
+            onProducts(false, false)
+            onPrices("برای دریافت اطلاعات اشتراک، اتصال کافه‌بازار برقرار نیست.")
+            return
+        }
         payment.getSubscriptionSkuDetails(
             skuIds = listOf(SUBSCRIPTION_SKU, TRIAL_SUBSCRIPTION_SKU)
         ) {
             getSkuDetailsSucceed { details ->
                 val annual = details.firstOrNull { it.sku == SUBSCRIPTION_SKU }
                 val trial = details.firstOrNull { it.sku == TRIAL_SUBSCRIPTION_SKU }
-                onPrices(
-                    listOf(
-                        "قیمت اشتراک ۳۶۵ روزه: ${annual?.price ?: "در کافه‌بازار یافت نشد"}",
-                        "قیمت دوره آزمایشی: ${trial?.price ?: "در کافه‌بازار یافت نشد"}"
-                    ).joinToString("\n")
-                )
+                val annualDigits = annual?.price?.toString()?.filter { it.isDigit() } ?: ""
+                val annualNumericPrice = annualDigits.mapNotNull { it.digitToIntOrNull() }
+                    .fold(0L) { acc, digit -> acc * 10 + digit }
+                annualProductAvailable = annual != null && annualNumericPrice > 0L
+                trialProductAvailable = trial != null
+                onProducts(annualProductAvailable, trialProductAvailable)
+                val annualText = when {
+                    annual == null -> "اشتراک سالانه در کافه‌بازار ثبت/قابل‌دسترسی نیست"
+                    annualNumericPrice <= 0L -> "قیمت معتبر اشتراک سالانه در کافه‌بازار موجود نیست"
+                    else -> "قیمت اشتراک ۳۶۵ روزه: ${annual.price}"
+                }
+                val trialText = if (trial == null) "دوره آزمایشی در کافه‌بازار ثبت/قابل‌دسترسی نیست"
+                    else "قیمت دوره آزمایشی: ${trial.price}"
+                onPrices(listOf(annualText, trialText).joinToString("\n"))
             }
             getSkuDetailsFailed { error ->
-                onPrices("دریافت قیمت از کافه‌بازار ناموفق بود: ${error.message ?: "خطای نامشخص"}")
+                annualProductAvailable = false
+                trialProductAvailable = false
+                onProducts(false, false)
+                onPrices("اطلاعات محصولات از کافه‌بازار دریافت نشد؛ دکمه‌های خرید غیرفعال هستند. ${error.message ?: ""}")
             }
         }
     }
@@ -95,6 +115,12 @@ class BazaarSubscriptionManager(
     fun subscribeTrial() = launchSubscriptionFlow(TRIAL_SUBSCRIPTION_SKU, true)
 
     private fun launchSubscriptionFlow(productId: String, isTrial: Boolean) {
+        val productAvailable = if (isTrial) trialProductAvailable else annualProductAvailable
+        if (!productAvailable) {
+            onStatus(false, if (isTrial) "دوره آزمایشی در کافه‌بازار در دسترس نیست؛ فعلاً امکان خرید وجود ندارد."
+                else "اشتراک ۳۶۵ روزه در کافه‌بازار در دسترس نیست؛ فعلاً امکان خرید وجود ندارد.")
+            return
+        }
         if (!connected) {
             onStatus(false, "ابتدا کافه‌بازار را نصب و وارد حساب خود کنید، سپس دوباره تلاش کنید.")
             connect()
@@ -132,6 +158,9 @@ class BazaarSubscriptionManager(
 
     fun disconnect() {
         connected = false
+        annualProductAvailable = false
+        trialProductAvailable = false
+        onProducts(false, false)
         connection?.disconnect()
         connection = null
     }
