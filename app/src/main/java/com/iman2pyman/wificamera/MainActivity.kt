@@ -23,6 +23,7 @@ import android.os.Build
 import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -83,6 +84,8 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var parentTalkEnabled: Boolean = false
     private var subscriptionManager: BazaarSubscriptionManager? = null
     private var subscriptionStatusText: TextView? = null
+    @Volatile private var premiumSubscriptionActive: Boolean = false
+    private var qrPaywallOverlay: View? = null
     private var parentAudioManager: AudioManager? = null
     private var previousParentAudioMode: Int? = null
     private var previousParentSpeakerphone: Boolean? = null
@@ -122,6 +125,8 @@ class MainActivity : AppCompatActivity() {
         showHome()
         subscriptionManager = BazaarSubscriptionManager(this) { active, message ->
             runOnUiThread {
+                premiumSubscriptionActive = active
+                qrPaywallOverlay?.visibility = if (active) View.GONE else View.VISIBLE
                 subscriptionStatusText?.text = message
                 subscriptionStatusText?.setTextColor(if (active) Color.rgb(34, 135, 91) else Color.rgb(83, 103, 126))
             }
@@ -454,7 +459,47 @@ class MainActivity : AppCompatActivity() {
         val qr = ImageView(this)
         val endpoint = if (ip != null) "http://$ip:8080?key=$sessionToken" else ""
         val qrData = "babymonitor://connect?ssid=${Uri.encode(ssid)}&password=${Uri.encode(password)}&url=${Uri.encode(endpoint)}"
-        try { qr.setImageBitmap(makeQr(qrData)); root.addView(qr, LinearLayout.LayoutParams(dp(280), dp(280)).apply { gravity = Gravity.CENTER; topMargin = dp(8); bottomMargin = dp(8) }) } catch (_: Exception) { }
+        try {
+            qr.setImageBitmap(makeQr(qrData))
+            val qrSize = dp(280)
+            val qrFrame = android.widget.FrameLayout(this).apply {
+                layoutParams = LinearLayout.LayoutParams(qrSize, qrSize).apply {
+                    gravity = Gravity.CENTER
+                    topMargin = dp(8)
+                    bottomMargin = dp(8)
+                }
+                addView(qr, android.widget.FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                ))
+            }
+            val paywall = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(dp(18), dp(18), dp(18), dp(18))
+                background = GradientDrawable().apply {
+                    setColor(Color.rgb(247, 249, 252))
+                    setStroke(dp(2), Color.rgb(220, 112, 151))
+                    cornerRadius = dp(18).toFloat()
+                }
+                addView(text("🔒", 38f))
+                addView(text("QR کد اتصال قفل است", 17f))
+                addView(text("برای مشاهده کد اتصال، اشتراک ویژه ۳۶۵ روزه را تهیه کنید.", 13f))
+                addView(button("خرید اشتراک ویژه — ۳۶۵ روزه") {
+                    subscriptionManager?.subscribe() ?: toast("سرویس پرداخت هنوز آماده نیست.")
+                })
+                addView(button("بررسی اشتراک") {
+                    subscriptionManager?.refresh() ?: toast("سرویس پرداخت هنوز آماده نیست.")
+                })
+            }
+            qrFrame.addView(paywall, android.widget.FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            ))
+            qrPaywallOverlay = paywall
+            paywall.visibility = if (premiumSubscriptionActive) View.GONE else View.VISIBLE
+            root.addView(qrFrame)
+        } catch (_: Exception) { }
         root.addView(text("نام شبکه: $ssid", 14f))
         root.addView(text(if (password.isBlank()) "رمز: بدون رمز" else "رمز شبکه: $password", 14f))
         root.addView(text(if (ip != null) "نشانی تصویر: http://$ip:8080" else "شبکه فعال است؛ در حال شناسایی نشانی محلی…", 13f))
