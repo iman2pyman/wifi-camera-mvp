@@ -1,4 +1,5 @@
 name: Build Signed Release APK
+# Build and sign the current feature branch so the APK can be tested before merging.
 
 on:
   workflow_dispatch:
