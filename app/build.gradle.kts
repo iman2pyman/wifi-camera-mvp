@@ -55,3 +55,5 @@ dependencies {
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     implementation("com.github.cafebazaar.Poolakey:poolakey:2.3.0")
 }
+
+// Subscription exclusivity release 1.5.9
