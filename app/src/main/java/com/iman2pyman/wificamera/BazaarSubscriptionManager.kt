@@ -28,6 +28,18 @@ class BazaarSubscriptionManager(
     @Volatile private var connected = false
     @Volatile private var annualProductAvailable = false
     @Volatile private var trialProductAvailable = false
+    @Volatile private var subscriptionStatusKnown = false
+    @Volatile private var activeTrialSubscription = false
+    @Volatile private var activeAnnualSubscription = false
+    @Volatile private var anySubscriptionActive = false
+
+    private fun publishPurchaseAvailability() {
+        val canStartNewSubscription = subscriptionStatusKnown && !anySubscriptionActive
+        onProducts(
+            annualProductAvailable && canStartNewSubscription,
+            trialProductAvailable && canStartNewSubscription
+        )
+    }
 
     fun connect() {
         if (connection != null) return
@@ -55,15 +67,30 @@ class BazaarSubscriptionManager(
         }
         payment.getSubscribedProducts {
             querySucceed { subscriptions ->
-                val active = subscriptions.isNotEmpty()
-                onStatus(
-                    active,
-                    if (active) "اشتراک شما در کافه‌بازار فعال است."
-                    else "اشتراک فعال پیدا نشد؛ می‌توانید دوره آزمایشی یا اشتراک یک‌ساله را تهیه کنید."
-                )
+                activeTrialSubscription = subscriptions.any { it.productId == TRIAL_SUBSCRIPTION_SKU }
+                activeAnnualSubscription = subscriptions.any { it.productId == SUBSCRIPTION_SKU }
+                anySubscriptionActive = subscriptions.isNotEmpty()
+                subscriptionStatusKnown = true
+                publishPurchaseAvailability()
+
+                val active = anySubscriptionActive
+                val message = when {
+                    activeTrialSubscription ->
+                        "اشتراک آزمایشی ۷ روزه شما فعال است؛ تا پایان آن امکان فعال‌سازی اشتراک سالانه وجود ندارد."
+                    activeAnnualSubscription ->
+                        "اشتراک سالانه شما فعال است؛ تا پایان آن امکان فعال‌سازی دوره آزمایشی وجود ندارد."
+                    active ->
+                        "یک اشتراک فعال برای حساب شما پیدا شد؛ امکان خرید اشتراک دیگری تا پایان آن وجود ندارد."
+                    else ->
+                        "اشتراک فعالی پیدا نشد؛ می‌توانید فقط یکی از دوره آزمایشی یا اشتراک یک‌ساله را انتخاب کنید."
+                }
+                onStatus(active, message)
             }
             queryFailed { error ->
-                onStatus(false, "بررسی اشتراک ناموفق بود: ${error.message ?: "خطای نامشخص"}")
+                subscriptionStatusKnown = false
+                anySubscriptionActive = true
+                publishPurchaseAvailability()
+                onStatus(false, "بررسی اشتراک ناموفق بود؛ برای جلوگیری از فعال‌شدن هم‌زمان دو اشتراک، خرید تا زمان بررسی مجدد غیرفعال شد: ${error.message ?: "خطای نامشخص"}")
             }
         }
     }
@@ -91,7 +118,7 @@ class BazaarSubscriptionManager(
                     .fold(0L) { acc, digit -> acc * 10 + digit }
                 annualProductAvailable = annual != null && annualNumericPrice > 0L
                 trialProductAvailable = trial != null
-                onProducts(annualProductAvailable, trialProductAvailable)
+                publishPurchaseAvailability()
                 val annualText = when {
                     annual == null -> "اشتراک سالانه در کافه‌بازار ثبت/قابل‌دسترسی نیست"
                     annualNumericPrice <= 0L -> "قیمت معتبر اشتراک سالانه در کافه‌بازار موجود نیست"
@@ -104,7 +131,7 @@ class BazaarSubscriptionManager(
             getSkuDetailsFailed { error ->
                 annualProductAvailable = false
                 trialProductAvailable = false
-                onProducts(false, false)
+                publishPurchaseAvailability()
                 onPrices("اطلاعات محصولات از کافه‌بازار دریافت نشد؛ دکمه‌های خرید غیرفعال هستند. ${error.message ?: ""}")
             }
         }
@@ -126,6 +153,39 @@ class BazaarSubscriptionManager(
             connect()
             return
         }
+
+        // Re-check immediately before opening Bazaar so two subscriptions cannot be activated together.
+        onStatus(false, "در حال بررسی اشتراک فعال حساب شما…")
+        payment.getSubscribedProducts {
+            querySucceed { subscriptions ->
+                activeTrialSubscription = subscriptions.any { it.productId == TRIAL_SUBSCRIPTION_SKU }
+                activeAnnualSubscription = subscriptions.any { it.productId == SUBSCRIPTION_SKU }
+                anySubscriptionActive = subscriptions.isNotEmpty()
+                subscriptionStatusKnown = true
+                publishPurchaseAvailability()
+
+                if (anySubscriptionActive) {
+                    val message = when {
+                        activeTrialSubscription -> "اشتراک آزمایشی ۷ روزه شما فعال است؛ تا پایان آن امکان خرید اشتراک سالانه ندارید."
+                        activeAnnualSubscription -> "اشتراک سالانه شما فعال است؛ تا پایان آن امکان فعال‌سازی دوره آزمایشی ندارید."
+                        else -> "برای حساب شما اشتراک فعالی وجود دارد؛ تا پایان آن امکان خرید اشتراک دیگری ندارید."
+                    }
+                    onStatus(true, message)
+                    return@querySucceed
+                }
+
+                beginSubscriptionPurchase(productId, isTrial)
+            }
+            queryFailed { error ->
+                subscriptionStatusKnown = false
+                anySubscriptionActive = true
+                publishPurchaseAvailability()
+                onStatus(false, "وضعیت اشتراک قابل بررسی نیست؛ برای جلوگیری از فعال‌شدن هم‌زمان دو اشتراک، پرداخت شروع نشد. ${error.message ?: ""}")
+            }
+        }
+    }
+
+    private fun beginSubscriptionPurchase(productId: String, isTrial: Boolean) {
         payment.subscribeProduct(
             registry = activity.activityResultRegistry,
             request = PurchaseRequest(
@@ -160,6 +220,8 @@ class BazaarSubscriptionManager(
         connected = false
         annualProductAvailable = false
         trialProductAvailable = false
+        subscriptionStatusKnown = false
+        anySubscriptionActive = true
         onProducts(false, false)
         connection?.disconnect()
         connection = null
