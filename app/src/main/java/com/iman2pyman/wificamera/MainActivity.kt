@@ -84,11 +84,6 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var parentTalkEnabled: Boolean = false
     private var subscriptionManager: BazaarSubscriptionManager? = null
     private var subscriptionStatusText: TextView? = null
-    private var trialStatusText: TextView? = null
-    private var qrTrialStatusText: TextView? = null
-    private var homeTrialButton: Button? = null
-    private var qrTrialButton: Button? = null
-    @Volatile private var trialAvailable: Boolean = false
     @Volatile private var premiumSubscriptionActive: Boolean = false
     private var qrPaywallOverlay: View? = null
     private var parentAudioManager: AudioManager? = null
@@ -136,19 +131,6 @@ class MainActivity : AppCompatActivity() {
                     qrPaywallOverlay?.visibility = if (active) View.GONE else View.VISIBLE
                     subscriptionStatusText?.text = message
                     subscriptionStatusText?.setTextColor(if (active) Color.rgb(34, 135, 91) else Color.rgb(83, 103, 126))
-                    val showTrial = trialAvailable && !active
-                    homeTrialButton?.visibility = if (showTrial) View.VISIBLE else View.GONE
-                    qrTrialButton?.visibility = if (showTrial) View.VISIBLE else View.GONE
-                }
-            },
-            onTrialStatus = { available, message ->
-                runOnUiThread {
-                    trialAvailable = available
-                    trialStatusText?.text = message
-                    qrTrialStatusText?.text = message
-                    val showTrial = available && !premiumSubscriptionActive
-                    homeTrialButton?.visibility = if (showTrial) View.VISIBLE else View.GONE
-                    qrTrialButton?.visibility = if (showTrial) View.VISIBLE else View.GONE
                 }
             }
         ).also { it.connect() }
@@ -264,13 +246,7 @@ class MainActivity : AppCompatActivity() {
         subscriptionCard.addView(text("دسترسی ویژه با اشتراک ۳۶۵ روزه کافه‌بازار", 13f))
         subscriptionStatusText = text("در حال بررسی وضعیت اشتراک…", 12f)
         subscriptionCard.addView(subscriptionStatusText)
-        trialStatusText = text("در حال بررسی شرایط دوره آزمایشی رایگان…", 12f)
-        subscriptionCard.addView(trialStatusText)
-        homeTrialButton = button("🎁 فعال‌سازی ۷ روز رایگان") {
-            subscriptionManager?.startTrial() ?: toast("سرویس پرداخت هنوز آماده نیست.")
-        }.apply { visibility = View.GONE }
-        subscriptionCard.addView(homeTrialButton)
-        subscriptionCard.addView(text("پس از پایان دوره آزمایشی، ادامه استفاده تابع شرایط اشتراک و تمدید ثبت‌شده در کافه‌بازار است.", 11f))
+        subscriptionCard.addView(text("با خرید، دسترسی ویژه طبق اشتراک ۳۶۵ روزه ثبت‌شده در کافه‌بازار فعال می‌شود.", 11f))
         subscriptionCard.addView(button("خرید اشتراک ویژه — ۳۶۵ روزه") {
             subscriptionManager?.subscribe() ?: toast("سرویس پرداخت هنوز آماده نیست.")
         })
@@ -481,65 +457,48 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showHotspotDetails(ssid: String, password: String, ip: String?) {
-        // Keep the camera preview attached; only append connection details.
+        // Keep every connection credential and the QR code behind the subscription gate.
         root.addView(text("شبکه اختصاصی آماده است", 20f))
         root.addView(text("در گوشی والدین، برنامه را باز کن و گزینه «اسکن QR اتصال» را بزن.", 14f))
+        val protectedContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }
         val qr = ImageView(this)
         val endpoint = if (ip != null) "http://$ip:8080?key=$sessionToken" else ""
         val qrData = "babymonitor://connect?ssid=${Uri.encode(ssid)}&password=${Uri.encode(password)}&url=${Uri.encode(endpoint)}"
         try {
             qr.setImageBitmap(makeQr(qrData))
             val qrSize = dp(280)
-            val qrFrame = android.widget.FrameLayout(this).apply {
-                layoutParams = LinearLayout.LayoutParams(qrSize, qrSize).apply {
-                    gravity = Gravity.CENTER
-                    topMargin = dp(8)
-                    bottomMargin = dp(8)
-                }
-                addView(qr, android.widget.FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT
-                ))
-            }
-            val paywall = LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
+            protectedContent.addView(qr, LinearLayout.LayoutParams(qrSize, qrSize).apply {
                 gravity = Gravity.CENTER
-                setPadding(dp(18), dp(18), dp(18), dp(18))
-                background = GradientDrawable().apply {
-                    setColor(Color.rgb(247, 249, 252))
-                    setStroke(dp(2), Color.rgb(220, 112, 151))
-                    cornerRadius = dp(18).toFloat()
-                }
-                addView(text("🔒", 38f))
-                addView(text("QR کد اتصال قفل است", 17f))
-                addView(text("برای مشاهده کد اتصال، دوره آزمایشی واجدشرایط ۷ روزه را فعال کنید یا اشتراک ویژه ۳۶۵ روزه بخرید.", 13f))
-                qrTrialStatusText = text("در حال بررسی شرایط دوره آزمایشی رایگان…", 11f)
-                addView(qrTrialStatusText)
-                qrTrialButton = button("🎁 فعال‌سازی ۷ روز رایگان") {
-                    subscriptionManager?.startTrial() ?: toast("سرویس پرداخت هنوز آماده نیست.")
-                }.apply { visibility = View.GONE }
-                addView(qrTrialButton)
-                addView(button("خرید اشتراک ویژه — ۳۶۵ روزه") {
-                    subscriptionManager?.subscribe() ?: toast("سرویس پرداخت هنوز آماده نیست.")
-                })
-                addView(button("بررسی اشتراک") {
-                    subscriptionManager?.refresh() ?: toast("سرویس پرداخت هنوز آماده نیست.")
-                })
-                addView(button("بررسی شرایط دوره رایگان") {
-                    subscriptionManager?.checkTrialAvailability() ?: toast("سرویس پرداخت هنوز آماده نیست.")
-                })
-            }
-            qrFrame.addView(paywall, android.widget.FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            ))
-            qrPaywallOverlay = paywall
-            paywall.visibility = if (premiumSubscriptionActive) View.GONE else View.VISIBLE
-            root.addView(qrFrame)
-        } catch (_: Exception) { }
-        root.addView(text("نام شبکه: $ssid", 14f))
-        root.addView(text(if (password.isBlank()) "رمز: بدون رمز" else "رمز شبکه: $password", 14f))
-        root.addView(text(if (ip != null) "نشانی تصویر: http://$ip:8080" else "شبکه فعال است؛ در حال شناسایی نشانی محلی…", 13f))
+                topMargin = dp(8)
+                bottomMargin = dp(8)
+            })
+        } catch (_: Exception) {
+            protectedContent.addView(text("ساخت QR ناموفق بود.", 13f))
+        }
+        protectedContent.addView(text("نام شبکه: $ssid", 14f))
+        protectedContent.addView(text(if (password.isBlank()) "رمز: بدون رمز" else "رمز شبکه: $password", 14f))
+        protectedContent.addView(text(if (ip != null) "نشانی تصویر: http://$ip:8080" else "شبکه فعال است؛ در حال شناسایی نشانی محلی…", 13f))
+        val protectedFrame = android.widget.FrameLayout(this)
+        protectedFrame.addView(protectedContent, android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        val paywall = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(18), dp(18), dp(18), dp(18))
+            background = GradientDrawable().apply { setColor(Color.rgb(247, 249, 252)); setStroke(dp(2), Color.rgb(220, 112, 151)); cornerRadius = dp(18).toFloat() }
+            addView(text("🔒", 38f))
+            addView(text("اطلاعات اتصال قفل است", 18f))
+            addView(text("برای نمایش QR کد، نام شبکه، رمز وای‌فای و آدرس اتصال، اشتراک ویژه ۳۶۵ روزه را از کافه‌بازار خریداری کنید.", 13f))
+            addView(button("خرید اشتراک ویژه — ۳۶۵ روزه") { subscriptionManager?.subscribe() ?: toast("سرویس پرداخت هنوز آماده نیست.") })
+            addView(button("بررسی / بازیابی اشتراک") { subscriptionManager?.refresh() ?: toast("سرویس پرداخت هنوز آماده نیست.") })
+        }
+        protectedFrame.addView(paywall, android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        qrPaywallOverlay = paywall
+        paywall.visibility = if (premiumSubscriptionActive) View.GONE else View.VISIBLE
+        root.addView(protectedFrame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6); bottomMargin = dp(8) })
         senderNetworkStatus?.text = "شبکه آماده است؛ منتظر اتصال گوشی والدین…"
         root.addView(button("توقف ارسال") { stopSender(); showHome() })
     }
