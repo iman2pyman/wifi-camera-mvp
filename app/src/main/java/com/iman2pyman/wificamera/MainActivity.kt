@@ -84,6 +84,7 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var parentTalkEnabled: Boolean = false
     private var subscriptionManager: BazaarSubscriptionManager? = null
     private var subscriptionStatusText: TextView? = null
+    private var subscriptionPriceText: TextView? = null
     @Volatile private var premiumSubscriptionActive: Boolean = false
     private var qrPaywallOverlay: View? = null
     private var parentAudioManager: AudioManager? = null
@@ -132,6 +133,9 @@ class MainActivity : AppCompatActivity() {
                     subscriptionStatusText?.text = message
                     subscriptionStatusText?.setTextColor(if (active) Color.rgb(34, 135, 91) else Color.rgb(83, 103, 126))
                 }
+            },
+            onPrices = { prices ->
+                runOnUiThread { subscriptionPriceText?.text = prices }
             }
         ).also { it.connect() }
     }
@@ -246,6 +250,8 @@ class MainActivity : AppCompatActivity() {
         subscriptionCard.addView(text("دسترسی ویژه با اشتراک ۳۶۵ روزه کافه‌بازار", 13f))
         subscriptionStatusText = text("در حال بررسی وضعیت اشتراک…", 12f)
         subscriptionCard.addView(subscriptionStatusText)
+        subscriptionPriceText = text("در حال دریافت قیمت‌ها از کافه‌بازار…", 12f)
+        subscriptionCard.addView(subscriptionPriceText)
         subscriptionCard.addView(text("با خرید، دسترسی ویژه طبق اشتراک ۳۶۵ روزه ثبت‌شده در کافه‌بازار فعال می‌شود.", 11f))
         subscriptionCard.addView(button("شروع دوره آزمایشی رایگان — ۷ روزه") {
             subscriptionManager?.subscribeTrial() ?: toast("سرویس پرداخت هنوز آماده نیست.")
