@@ -85,6 +85,8 @@ class MainActivity : AppCompatActivity() {
     private var subscriptionManager: BazaarSubscriptionManager? = null
     private var subscriptionStatusText: TextView? = null
     private var subscriptionPriceText: TextView? = null
+    private var annualSubscribeButton: Button? = null
+    private var trialSubscribeButton: Button? = null
     @Volatile private var premiumSubscriptionActive: Boolean = false
     private var qrPaywallOverlay: View? = null
     private var parentAudioManager: AudioManager? = null
@@ -136,6 +138,14 @@ class MainActivity : AppCompatActivity() {
             },
             onPrices = { prices ->
                 runOnUiThread { subscriptionPriceText?.text = prices }
+            },
+            onProducts = { annualAvailable, trialAvailable ->
+                runOnUiThread {
+                    annualSubscribeButton?.isEnabled = annualAvailable
+                    annualSubscribeButton?.alpha = if (annualAvailable) 1f else 0.45f
+                    trialSubscribeButton?.isEnabled = trialAvailable
+                    trialSubscribeButton?.alpha = if (trialAvailable) 1f else 0.45f
+                }
             }
         ).also { it.connect() }
     }
@@ -253,12 +263,14 @@ class MainActivity : AppCompatActivity() {
         subscriptionPriceText = text("در حال دریافت قیمت‌ها از کافه‌بازار…", 12f)
         subscriptionCard.addView(subscriptionPriceText)
         subscriptionCard.addView(text("با خرید، دسترسی ویژه طبق اشتراک ۳۶۵ روزه ثبت‌شده در کافه‌بازار فعال می‌شود.", 11f))
-        subscriptionCard.addView(button("شروع دوره آزمایشی رایگان — ۷ روزه") {
+        trialSubscribeButton = button("شروع دوره آزمایشی رایگان — ۷ روزه") {
             subscriptionManager?.subscribeTrial() ?: toast("سرویس پرداخت هنوز آماده نیست.")
-        })
-        subscriptionCard.addView(button("خرید اشتراک ویژه — ۳۶۵ روزه") {
+        }.apply { isEnabled = false; alpha = 0.45f }
+        subscriptionCard.addView(trialSubscribeButton)
+        annualSubscribeButton = button("خرید اشتراک ویژه — ۳۶۵ روزه") {
             subscriptionManager?.subscribe() ?: toast("سرویس پرداخت هنوز آماده نیست.")
-        })
+        }.apply { isEnabled = false; alpha = 0.45f }
+        subscriptionCard.addView(annualSubscribeButton)
         subscriptionCard.addView(button("بازیابی / بررسی اشتراک") {
             subscriptionManager?.refresh() ?: toast("سرویس پرداخت هنوز آماده نیست.")
         })
