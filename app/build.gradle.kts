@@ -15,9 +15,19 @@ android {
         versionName = "1.5.5"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file(System.getenv("SIGNING_KEYSTORE_PATH") ?: "release-keystore.jks")
+            storePassword = System.getenv("SIGNING_STORE_PASSWORD") ?: ""
+            keyAlias = System.getenv("SIGNING_KEY_ALIAS") ?: "baby_monitor_release"
+            keyPassword = System.getenv("SIGNING_KEY_PASSWORD") ?: ""
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
