@@ -81,7 +81,7 @@ class BazaarSubscriptionManager(
                     listOf(
                         "قیمت اشتراک ۳۶۵ روزه: ${annual?.price ?: "در کافه‌بازار یافت نشد"}",
                         "قیمت دوره آزمایشی: ${trial?.price ?: "در کافه‌بازار یافت نشد"}"
-                    ).joinToString("\\n")
+                    ).joinToString("\n")
                 )
             }
             getSkuDetailsFailed { error ->
