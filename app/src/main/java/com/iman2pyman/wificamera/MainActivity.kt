@@ -23,6 +23,7 @@ import android.os.Build
 import android.os.Bundle
 import android.text.InputType
 import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -81,6 +82,10 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var soundLevel: Double = 0.0
     @Volatile private var pendingParentTalk: Pair<String, String>? = null
     @Volatile private var parentTalkEnabled: Boolean = false
+    private var subscriptionManager: BazaarSubscriptionManager? = null
+    private var subscriptionStatusText: TextView? = null
+    @Volatile private var premiumSubscriptionActive: Boolean = false
+    private var qrPaywallOverlay: View? = null
     private var parentAudioManager: AudioManager? = null
     private var previousParentAudioMode: Int? = null
     private var previousParentSpeakerphone: Boolean? = null
@@ -118,6 +123,17 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         title = "دوربین کنترل کودک"
         showHome()
+        subscriptionManager = BazaarSubscriptionManager(
+            activity = this,
+            onStatus = { active, message ->
+                runOnUiThread {
+                    premiumSubscriptionActive = active
+                    qrPaywallOverlay?.visibility = if (active) View.GONE else View.VISIBLE
+                    subscriptionStatusText?.text = message
+                    subscriptionStatusText?.setTextColor(if (active) Color.rgb(34, 135, 91) else Color.rgb(83, 103, 126))
+                }
+            }
+        ).also { it.connect() }
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
@@ -219,6 +235,28 @@ class MainActivity : AppCompatActivity() {
         root.addView(senderCard)
         val viewerCard = homeActionCard("👀", "گوشی والدین", "از گوشی دوم، تصویر زنده و وضعیت اتصال را مشاهده کنید.", Color.rgb(220, 112, 151)) { showViewer() }
         root.addView(viewerCard)
+
+        val subscriptionCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(15), dp(12), dp(15), dp(12))
+            background = rounded(Color.WHITE, 20, Color.rgb(222, 237, 248))
+            elevation = dp(3).toFloat()
+        }
+        subscriptionCard.addView(text("⭐ اشتراک ویژه یک‌ساله", 18f))
+        subscriptionCard.addView(text("دسترسی ویژه با اشتراک ۳۶۵ روزه کافه‌بازار", 13f))
+        subscriptionStatusText = text("در حال بررسی وضعیت اشتراک…", 12f)
+        subscriptionCard.addView(subscriptionStatusText)
+        subscriptionCard.addView(text("با خرید، دسترسی ویژه طبق اشتراک ۳۶۵ روزه ثبت‌شده در کافه‌بازار فعال می‌شود.", 11f))
+        subscriptionCard.addView(button("شروع دوره آزمایشی رایگان — ۷ روزه") {
+            subscriptionManager?.subscribeTrial() ?: toast("سرویس پرداخت هنوز آماده نیست.")
+        })
+        subscriptionCard.addView(button("خرید اشتراک ویژه — ۳۶۵ روزه") {
+            subscriptionManager?.subscribe() ?: toast("سرویس پرداخت هنوز آماده نیست.")
+        })
+        subscriptionCard.addView(button("بازیابی / بررسی اشتراک") {
+            subscriptionManager?.refresh() ?: toast("سرویس پرداخت هنوز آماده نیست.")
+        })
+        root.addView(subscriptionCard, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12); bottomMargin = dp(8) })
 
         val useCases = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -422,16 +460,49 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showHotspotDetails(ssid: String, password: String, ip: String?) {
-        // Keep the camera preview attached; only append connection details.
+        // Keep every connection credential and the QR code behind the subscription gate.
         root.addView(text("شبکه اختصاصی آماده است", 20f))
         root.addView(text("در گوشی والدین، برنامه را باز کن و گزینه «اسکن QR اتصال» را بزن.", 14f))
+        val protectedContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }
         val qr = ImageView(this)
         val endpoint = if (ip != null) "http://$ip:8080?key=$sessionToken" else ""
         val qrData = "babymonitor://connect?ssid=${Uri.encode(ssid)}&password=${Uri.encode(password)}&url=${Uri.encode(endpoint)}"
-        try { qr.setImageBitmap(makeQr(qrData)); root.addView(qr, LinearLayout.LayoutParams(dp(280), dp(280)).apply { gravity = Gravity.CENTER; topMargin = dp(8); bottomMargin = dp(8) }) } catch (_: Exception) { }
-        root.addView(text("نام شبکه: $ssid", 14f))
-        root.addView(text(if (password.isBlank()) "رمز: بدون رمز" else "رمز شبکه: $password", 14f))
-        root.addView(text(if (ip != null) "نشانی تصویر: http://$ip:8080" else "شبکه فعال است؛ در حال شناسایی نشانی محلی…", 13f))
+        try {
+            qr.setImageBitmap(makeQr(qrData))
+            val qrSize = dp(280)
+            protectedContent.addView(qr, LinearLayout.LayoutParams(qrSize, qrSize).apply {
+                gravity = Gravity.CENTER
+                topMargin = dp(8)
+                bottomMargin = dp(8)
+            })
+        } catch (_: Exception) {
+            protectedContent.addView(text("ساخت QR ناموفق بود.", 13f))
+        }
+        protectedContent.addView(text("نام شبکه: $ssid", 14f))
+        protectedContent.addView(text(if (password.isBlank()) "رمز: بدون رمز" else "رمز شبکه: $password", 14f))
+        protectedContent.addView(text(if (ip != null) "نشانی تصویر: http://$ip:8080" else "شبکه فعال است؛ در حال شناسایی نشانی محلی…", 13f))
+        val protectedFrame = android.widget.FrameLayout(this)
+        protectedFrame.addView(protectedContent, android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        val paywall = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(18), dp(18), dp(18), dp(18))
+            background = GradientDrawable().apply { setColor(Color.rgb(247, 249, 252)); setStroke(dp(2), Color.rgb(220, 112, 151)); cornerRadius = dp(18).toFloat() }
+            addView(text("🔒", 38f))
+            addView(text("اطلاعات اتصال قفل است", 18f))
+            addView(text("برای نمایش QR کد، نام شبکه، رمز وای‌فای و آدرس اتصال، دوره آزمایشی رایگان ۷ روزه یا اشتراک ویژه ۳۶۵ روزه را از کافه‌بازار فعال کنید.", 13f))
+            addView(button("شروع دوره آزمایشی رایگان — ۷ روزه") { subscriptionManager?.subscribeTrial() ?: toast("سرویس پرداخت هنوز آماده نیست.") })
+            addView(button("خرید اشتراک ویژه — ۳۶۵ روزه") { subscriptionManager?.subscribe() ?: toast("سرویس پرداخت هنوز آماده نیست.") })
+            addView(button("بررسی / بازیابی اشتراک") { subscriptionManager?.refresh() ?: toast("سرویس پرداخت هنوز آماده نیست.") })
+        }
+        protectedFrame.addView(paywall, android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        qrPaywallOverlay = paywall
+        paywall.visibility = if (premiumSubscriptionActive) View.GONE else View.VISIBLE
+        root.addView(protectedFrame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(6); bottomMargin = dp(8) })
         senderNetworkStatus?.text = "شبکه آماده است؛ منتظر اتصال گوشی والدین…"
         root.addView(button("توقف ارسال") { stopSender(); showHome() })
     }
@@ -961,6 +1032,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         // The foreground sender service owns the camera session and may outlive this Activity.
+        subscriptionManager?.disconnect()
+        subscriptionManager = null
         restoreParentSpeakerRoute()
         restoreImmersiveMode()
         executor.shutdown()

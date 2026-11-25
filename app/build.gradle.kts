@@ -11,8 +11,8 @@ android {
         applicationId = "com.iman2pyman.wificamera"
         minSdk = 23
         targetSdk = 35
-        versionCode = 12
-        versionName = "1.5.5"
+        versionCode = 14
+        versionName = "1.5.7"
     }
 
     signingConfigs {
@@ -53,4 +53,5 @@ dependencies {
     implementation("org.nanohttpd:nanohttpd:2.3.1")
     implementation("com.google.zxing:core:3.5.3")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    implementation("com.github.cafebazaar.Poolakey:poolakey:2.3.0")
 }
