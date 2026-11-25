@@ -2,8 +2,9 @@ package com.iman2pyman.wificamera
 
 import androidx.appcompat.app.AppCompatActivity
 import ir.cafebazaar.poolakey.Payment
-import ir.cafebazaar.poolakey.PaymentConfiguration
-import ir.cafebazaar.poolakey.SecurityCheck
+import ir.cafebazaar.poolakey.Connection
+import ir.cafebazaar.poolakey.config.PaymentConfiguration
+import ir.cafebazaar.poolakey.config.SecurityCheck
 import ir.cafebazaar.poolakey.request.PurchaseRequest
 
 /**
@@ -22,7 +23,7 @@ class BazaarSubscriptionManager(
         )
     )
 
-    private var connection: ir.cafebazaar.poolakey.connection.Connection? = null
+    private var connection: Connection? = null
     @Volatile private var connected = false
 
     fun connect() {
@@ -73,7 +74,6 @@ class BazaarSubscriptionManager(
             registry = activity.activityResultRegistry,
             request = PurchaseRequest(
                 productId = SUBSCRIPTION_SKU,
-                requestCode = SUBSCRIPTION_REQUEST_CODE,
                 payload = "baby-monitor-camera-365-day"
             )
         ) {
@@ -104,7 +104,6 @@ class BazaarSubscriptionManager(
 
     companion object {
         const val SUBSCRIPTION_SKU = "Baby-monitor-camera"
-        private const val SUBSCRIPTION_REQUEST_CODE = 3652026
         private const val RSA_PUBLIC_KEY = "$key"
     }
 }
