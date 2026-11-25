@@ -81,6 +81,8 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var soundLevel: Double = 0.0
     @Volatile private var pendingParentTalk: Pair<String, String>? = null
     @Volatile private var parentTalkEnabled: Boolean = false
+    private var subscriptionManager: BazaarSubscriptionManager? = null
+    private var subscriptionStatusText: TextView? = null
     private var parentAudioManager: AudioManager? = null
     private var previousParentAudioMode: Int? = null
     private var previousParentSpeakerphone: Boolean? = null
@@ -118,6 +120,12 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         title = "دوربین کنترل کودک"
         showHome()
+        subscriptionManager = BazaarSubscriptionManager(this) { active, message ->
+            runOnUiThread {
+                subscriptionStatusText?.text = message
+                subscriptionStatusText?.setTextColor(if (active) Color.rgb(34, 135, 91) else Color.rgb(83, 103, 126))
+            }
+        }.also { it.connect() }
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
@@ -219,6 +227,24 @@ class MainActivity : AppCompatActivity() {
         root.addView(senderCard)
         val viewerCard = homeActionCard("👀", "گوشی والدین", "از گوشی دوم، تصویر زنده و وضعیت اتصال را مشاهده کنید.", Color.rgb(220, 112, 151)) { showViewer() }
         root.addView(viewerCard)
+
+        val subscriptionCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(15), dp(12), dp(15), dp(12))
+            background = rounded(Color.WHITE, 20, Color.rgb(222, 237, 248))
+            elevation = dp(3).toFloat()
+        }
+        subscriptionCard.addView(text("⭐ اشتراک ویژه یک‌ساله", 18f))
+        subscriptionCard.addView(text("دسترسی ویژه با اشتراک ۳۶۵ روزه کافه‌بازار", 13f))
+        subscriptionStatusText = text("در حال بررسی وضعیت اشتراک…", 12f)
+        subscriptionCard.addView(subscriptionStatusText)
+        subscriptionCard.addView(button("خرید اشتراک ویژه — ۳۶۵ روزه") {
+            subscriptionManager?.subscribe() ?: toast("سرویس پرداخت هنوز آماده نیست.")
+        })
+        subscriptionCard.addView(button("بازیابی / بررسی اشتراک") {
+            subscriptionManager?.refresh() ?: toast("سرویس پرداخت هنوز آماده نیست.")
+        })
+        root.addView(subscriptionCard, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(12); bottomMargin = dp(8) })
 
         val useCases = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -961,6 +987,8 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         // The foreground sender service owns the camera session and may outlive this Activity.
+        subscriptionManager?.disconnect()
+        subscriptionManager = null
         restoreParentSpeakerRoute()
         restoreImmersiveMode()
         executor.shutdown()
