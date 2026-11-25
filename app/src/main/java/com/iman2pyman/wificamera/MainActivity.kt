@@ -247,6 +247,9 @@ class MainActivity : AppCompatActivity() {
         subscriptionStatusText = text("در حال بررسی وضعیت اشتراک…", 12f)
         subscriptionCard.addView(subscriptionStatusText)
         subscriptionCard.addView(text("با خرید، دسترسی ویژه طبق اشتراک ۳۶۵ روزه ثبت‌شده در کافه‌بازار فعال می‌شود.", 11f))
+        subscriptionCard.addView(button("شروع دوره آزمایشی رایگان — ۷ روزه") {
+            subscriptionManager?.subscribeTrial() ?: toast("سرویس پرداخت هنوز آماده نیست.")
+        })
         subscriptionCard.addView(button("خرید اشتراک ویژه — ۳۶۵ روزه") {
             subscriptionManager?.subscribe() ?: toast("سرویس پرداخت هنوز آماده نیست.")
         })
@@ -491,7 +494,8 @@ class MainActivity : AppCompatActivity() {
             background = GradientDrawable().apply { setColor(Color.rgb(247, 249, 252)); setStroke(dp(2), Color.rgb(220, 112, 151)); cornerRadius = dp(18).toFloat() }
             addView(text("🔒", 38f))
             addView(text("اطلاعات اتصال قفل است", 18f))
-            addView(text("برای نمایش QR کد، نام شبکه، رمز وای‌فای و آدرس اتصال، اشتراک ویژه ۳۶۵ روزه را از کافه‌بازار خریداری کنید.", 13f))
+            addView(text("برای نمایش QR کد، نام شبکه، رمز وای‌فای و آدرس اتصال، دوره آزمایشی رایگان ۷ روزه یا اشتراک ویژه ۳۶۵ روزه را از کافه‌بازار فعال کنید.", 13f))
+            addView(button("شروع دوره آزمایشی رایگان — ۷ روزه") { subscriptionManager?.subscribeTrial() ?: toast("سرویس پرداخت هنوز آماده نیست.") })
             addView(button("خرید اشتراک ویژه — ۳۶۵ روزه") { subscriptionManager?.subscribe() ?: toast("سرویس پرداخت هنوز آماده نیست.") })
             addView(button("بررسی / بازیابی اشتراک") { subscriptionManager?.refresh() ?: toast("سرویس پرداخت هنوز آماده نیست.") })
         }
