@@ -290,7 +290,7 @@ class MainActivity : AppCompatActivity() {
     private fun showAboutDialog() {
         android.app.AlertDialog.Builder(this)
             .setTitle("درباره دوربین کنترل کودک")
-            .setMessage("نام برنامه: دوربین کنترل کودک\nنام انگلیسی: Baby Monitor Camera\n\nاین برنامه برای مشاهده تصویر کودک از طریق اتصال محلی دو گوشی طراحی شده است.\n\nسازنده: ایمان محمدپور")
+            .setMessage("نام برنامه: دوربین کنترل کودک\nنام انگلیسی: Baby Monitor Camera\n\nاین برنامه برای مشاهده تصویر کودک از طریق اتصال محلی دو گوشی طراحی شده است.\n\nسازنده: IA digital")
             .setPositiveButton("بستن", null)
             .show()
     }
