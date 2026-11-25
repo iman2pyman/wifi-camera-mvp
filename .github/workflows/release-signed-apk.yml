@@ -34,7 +34,7 @@ jobs:
 
       - name: Build signed APK
         env:
-          SIGNING_KEYSTORE_PATH: app/release-keystore.jks
+          SIGNING_KEYSTORE_PATH: release-keystore.jks
           SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
           SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
           SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
