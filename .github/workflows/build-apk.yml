@@ -2,7 +2,7 @@ name: Build WiFi Camera APK
 
 on:
   push:
-    branches: [main, 'feature/parent-dashboard', 'fix/continuous-media-talkback', 'fix/stable-video-audio-v2', 'feature/parent-fullscreen-overlay-controls']
+    branches: [main, 'feature/parent-dashboard', 'fix/continuous-media-talkback', 'fix/stable-video-audio-v2', 'feature/parent-fullscreen-overlay-controls', 'feature/background-camera-foreground-service']
   workflow_dispatch:
 
 permissions:

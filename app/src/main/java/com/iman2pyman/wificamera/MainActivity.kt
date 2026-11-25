@@ -36,10 +36,8 @@ import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AppCompatActivity
-import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
-import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.core.content.ContextCompat
 import com.google.zxing.BarcodeFormat
@@ -65,8 +63,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var root: LinearLayout
     private var cameraServer: CameraHttpServer? = null
     private val executor = Executors.newSingleThreadExecutor()
-    @Volatile private var latestJpeg: ByteArray? = null
-    @Volatile private var latestFrameAt: Long = 0L
     private var senderNetworkStatus: TextView? = null
     private var hotspotReservation: Any? = null
     private var fallbackHotspotMode = false
@@ -108,7 +104,10 @@ class MainActivity : AppCompatActivity() {
         if (granted) {
             val pending = pendingParentTalk
             if (pending != null) { pendingParentTalk = null; startParentTalk(pending.first, pending.second) }
-            else startSoundMonitor()
+            else {
+                if (senderNetworkStatus != null) startSenderService(enableAudio = true)
+                startSoundMonitor()
+            }
         } else toast("اجازه میکروفون داده نشد؛ قابلیت‌های صوتی غیرفعال هستند.")
     }
     private val wifiPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -340,39 +339,30 @@ class MainActivity : AppCompatActivity() {
         root.addView(button("⏹  توقف ارسال و بازگشت") { stopSender(); showHome() })
         setContentView(scroll)
 
-        val future = ProcessCameraProvider.getInstance(this)
-        future.addListener({
-            try {
-                val provider = future.get()
-                val previewUseCase = androidx.camera.core.Preview.Builder().build()
-                val analysisUseCase = ImageAnalysis.Builder()
-                    .setTargetResolution(Size(640, 480))
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .build()
-                previewUseCase.setSurfaceProvider(preview.surfaceProvider)
-                analysisUseCase.setAnalyzer(executor) { frame ->
-                    try {
-                        val jpeg = imageProxyToJpeg(frame)
-                        if (jpeg.isNotEmpty()) {
-                            latestJpeg = jpeg
-                            latestFrameAt = android.os.SystemClock.elapsedRealtime()
-                            runOnUiThread { senderNetworkStatus?.text = "تصویر زنده آماده است؛ منتظر اتصال گوشی والدین…" }
-                        }
-                    } catch (e: Exception) {
-                        runOnUiThread { senderNetworkStatus?.text = "خطای پردازش تصویر: ${e.message}" }
-                    } finally {
-                        frame.close()
-                    }
-                }
-                provider.unbindAll()
-                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, previewUseCase, analysisUseCase)
-                if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) startSoundMonitor() else audioPermission.launch(Manifest.permission.RECORD_AUDIO)
-                if (Build.VERSION.SDK_INT >= 26) startLocalOnlyHotspot(status)
-                else showManualHotspotFallback(status)
-            } catch (e: Exception) {
-                toast("راه‌اندازی دوربین ناموفق بود: ${e.message}")
+        SenderCameraRuntime.previewSurfaceProvider = preview.surfaceProvider
+
+        val audioGranted = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        startSenderService(enableAudio = audioGranted)
+        if (audioGranted) startSoundMonitor() else audioPermission.launch(Manifest.permission.RECORD_AUDIO)
+
+        if (Build.VERSION.SDK_INT >= 26) startLocalOnlyHotspot(status)
+        else showManualHotspotFallback(status)
+    }
+
+    private fun startSenderService(enableAudio: Boolean) {
+        try {
+            val intent = Intent(this, SenderCameraService::class.java)
+                .putExtra("enable_audio", enableAudio)
+            if (Build.VERSION.SDK_INT >= 26) ContextCompat.startForegroundService(this, intent)
+            else startService(intent)
+            senderNetworkStatus?.text = if (enableAudio) {
+                "دوربین و سرویس صدای پس‌زمینه در حال راه‌اندازی هستند…"
+            } else {
+                "سرویس دوربین در پس‌زمینه در حال راه‌اندازی است…"
             }
-        }, ContextCompat.getMainExecutor(this))
+        } catch (e: Exception) {
+            toast("راه‌اندازی سرویس پس‌زمینه ناموفق بود: ${e.message}")
+        }
     }
 
     @RequiresApi(26)
@@ -669,7 +659,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun startHttpServer() {
         if (cameraServer != null) return
-        val server = CameraHttpServer(8080, { latestJpeg }, { latestFrameAt }, { currentBatteryPercent() }, { sessionToken }, { soundLevel }, { latestAudioPacket }, { bytes -> if (parentTalkEnabled) playTalkAudio(bytes) })
+        val server = CameraHttpServer(8080, { SenderCameraRuntime.latestJpeg }, { SenderCameraRuntime.latestFrameAt }, { currentBatteryPercent() }, { sessionToken }, { soundLevel }, { latestAudioPacket }, { bytes -> if (parentTalkEnabled) playTalkAudio(bytes) })
         server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
         cameraServer = server
     }
@@ -940,9 +930,11 @@ class MainActivity : AppCompatActivity() {
             try { (hotspotReservation as? WifiManager.LocalOnlyHotspotReservation)?.close() } catch (_: Exception) { }
         }
         hotspotReservation = null
-        try { ProcessCameraProvider.getInstance(this).get().unbindAll() } catch (_: Exception) { }
-        latestJpeg = null
-        latestFrameAt = 0L
+        try { stopService(Intent(this, SenderCameraService::class.java)) } catch (_: Exception) { }
+        SenderCameraRuntime.previewSurfaceProvider = null
+        SenderCameraRuntime.latestJpeg = null
+        SenderCameraRuntime.latestFrameAt = 0L
+        SenderCameraRuntime.lastError = null
         senderNetworkStatus = null
         fallbackHotspotMode = false
     }
@@ -968,9 +960,9 @@ class MainActivity : AppCompatActivity() {
     private fun toast(message: String) = Toast.makeText(this, message, Toast.LENGTH_LONG).show()
 
     override fun onDestroy() {
+        // The foreground sender service owns the camera session and may outlive this Activity.
         restoreParentSpeakerRoute()
         restoreImmersiveMode()
-        stopSender()
         executor.shutdown()
         super.onDestroy()
     }

@@ -11,8 +11,8 @@ android {
         applicationId = "com.iman2pyman.wificamera"
         minSdk = 23
         targetSdk = 35
-        versionCode = 11
-        versionName = "1.5.4"
+        versionCode = 12
+        versionName = "1.5.5"
     }
 
     buildTypes {
@@ -33,6 +33,7 @@ android {
 
 dependencies {
     implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.lifecycle:lifecycle-service:2.8.7")
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.activity:activity-ktx:1.10.0")
     implementation("androidx.camera:camera-core:1.4.1")
