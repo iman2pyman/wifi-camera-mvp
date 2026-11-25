@@ -7,6 +7,7 @@ on:
     branches:
       - main
       - feature/bazaar-365-day-subscription
+      - feature/bazaar-subscription-price-lookup
 
 permissions:
   contents: read
