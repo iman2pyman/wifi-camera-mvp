@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - feature/bazaar-365-day-subscription
 
 permissions:
   contents: read
