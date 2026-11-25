@@ -37,7 +37,7 @@ class BazaarSubscriptionManager(
             }
             connectionFailed { error ->
                 connected = false
-                onStatus(false, "اتصال به پرداخت کافه‌بازار برقرار نشد: \${error.message ?: "خطای نامشخص"}")
+                onStatus(false, "اتصال به پرداخت کافه‌بازار برقرار نشد: ${error.message ?: "خطای نامشخص"}")
                 onTrialStatus(false, "برای بررسی دوره آزمایشی، اتصال به کافه‌بازار لازم است.")
             }
             disconnected {
@@ -66,7 +66,7 @@ class BazaarSubscriptionManager(
                 if (!active) checkTrialAvailability()
             }
             queryFailed { error ->
-                onStatus(false, "بررسی اشتراک ناموفق بود: \${error.message ?: "خطای نامشخص"}")
+                onStatus(false, "بررسی اشتراک ناموفق بود: ${error.message ?: "خطای نامشخص"}")
             }
         }
     }
@@ -84,14 +84,14 @@ class BazaarSubscriptionManager(
                     when {
                         isSevenDayTrial -> "شما واجد شرایط دریافت ۷ روز اشتراک آزمایشی رایگان هستید."
                         !trialInfo.isAvailable -> "دوره آزمایشی رایگان قبلاً استفاده شده یا برای این حساب در دسترس نیست."
-                        else -> "مدت دوره آزمایشی ثبت‌شده در کافه‌بازار \${trialInfo.trialPeriodDays} روز است؛ برای فعال‌سازی، باید دقیقاً ۷ روز تنظیم شود."
+                        else -> "مدت دوره آزمایشی ثبت‌شده در کافه‌بازار ${trialInfo.trialPeriodDays} روز است؛ برای فعال‌سازی، باید دقیقاً ۷ روز تنظیم شود."
                     }
                 )
             }
             checkTrialSubscriptionFailed { error ->
                 onTrialStatus(
                     false,
-                    "بررسی دوره آزمایشی ممکن نشد: \${error.message ?: "کافه‌بازار را به‌روزرسانی و دوباره تلاش کنید."}"
+                    "بررسی دوره آزمایشی ممکن نشد: ${error.message ?: "کافه‌بازار را به‌روزرسانی و دوباره تلاش کنید."}"
                 )
             }
         }
@@ -123,7 +123,7 @@ class BazaarSubscriptionManager(
                 }
             }
             checkTrialSubscriptionFailed { error ->
-                onTrialStatus(false, "بررسی شرایط دوره آزمایشی ناموفق بود: \${error.message ?: "خطای نامشخص"}")
+                onTrialStatus(false, "بررسی شرایط دوره آزمایشی ناموفق بود: ${error.message ?: "خطای نامشخص"}")
             }
         }
     }
@@ -149,7 +149,7 @@ class BazaarSubscriptionManager(
                 onStatus(false, "صفحه اشتراک کافه‌بازار باز شد؛ مراحل نمایش‌داده‌شده را تکمیل کنید.")
             }
             failedToBeginFlow { error ->
-                onStatus(false, "شروع فرایند اشتراک ناموفق بود: \${error.message ?: "خطای نامشخص"}")
+                onStatus(false, "شروع فرایند اشتراک ناموفق بود: ${error.message ?: "خطای نامشخص"}")
                 refresh()
             }
             purchaseSucceed {
@@ -161,7 +161,7 @@ class BazaarSubscriptionManager(
                 refresh()
             }
             purchaseFailed { error ->
-                onStatus(false, "فعال‌سازی اشتراک ناموفق بود: \${error.message ?: "خطای نامشخص"}")
+                onStatus(false, "فعال‌سازی اشتراک ناموفق بود: ${error.message ?: "خطای نامشخص"}")
                 refresh()
             }
         }
