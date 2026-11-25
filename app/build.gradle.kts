@@ -57,3 +57,5 @@ dependencies {
 }
 
 // Subscription exclusivity release 1.5.9
+
+// Rebuild after correcting trial-to-annual upgrade eligibility.
