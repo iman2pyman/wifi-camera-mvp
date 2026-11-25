@@ -84,6 +84,11 @@ class MainActivity : AppCompatActivity() {
     @Volatile private var parentTalkEnabled: Boolean = false
     private var subscriptionManager: BazaarSubscriptionManager? = null
     private var subscriptionStatusText: TextView? = null
+    private var trialStatusText: TextView? = null
+    private var qrTrialStatusText: TextView? = null
+    private var homeTrialButton: Button? = null
+    private var qrTrialButton: Button? = null
+    @Volatile private var trialAvailable: Boolean = false
     @Volatile private var premiumSubscriptionActive: Boolean = false
     private var qrPaywallOverlay: View? = null
     private var parentAudioManager: AudioManager? = null
@@ -123,14 +128,30 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         title = "دوربین کنترل کودک"
         showHome()
-        subscriptionManager = BazaarSubscriptionManager(this) { active, message ->
-            runOnUiThread {
-                premiumSubscriptionActive = active
-                qrPaywallOverlay?.visibility = if (active) View.GONE else View.VISIBLE
-                subscriptionStatusText?.text = message
-                subscriptionStatusText?.setTextColor(if (active) Color.rgb(34, 135, 91) else Color.rgb(83, 103, 126))
+        subscriptionManager = BazaarSubscriptionManager(
+            activity = this,
+            onStatus = { active, message ->
+                runOnUiThread {
+                    premiumSubscriptionActive = active
+                    qrPaywallOverlay?.visibility = if (active) View.GONE else View.VISIBLE
+                    subscriptionStatusText?.text = message
+                    subscriptionStatusText?.setTextColor(if (active) Color.rgb(34, 135, 91) else Color.rgb(83, 103, 126))
+                    val showTrial = trialAvailable && !active
+                    homeTrialButton?.visibility = if (showTrial) View.VISIBLE else View.GONE
+                    qrTrialButton?.visibility = if (showTrial) View.VISIBLE else View.GONE
+                }
+            },
+            onTrialStatus = { available, message ->
+                runOnUiThread {
+                    trialAvailable = available
+                    trialStatusText?.text = message
+                    qrTrialStatusText?.text = message
+                    val showTrial = available && !premiumSubscriptionActive
+                    homeTrialButton?.visibility = if (showTrial) View.VISIBLE else View.GONE
+                    qrTrialButton?.visibility = if (showTrial) View.VISIBLE else View.GONE
+                }
             }
-        }.also { it.connect() }
+        ).also { it.connect() }
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
@@ -243,6 +264,13 @@ class MainActivity : AppCompatActivity() {
         subscriptionCard.addView(text("دسترسی ویژه با اشتراک ۳۶۵ روزه کافه‌بازار", 13f))
         subscriptionStatusText = text("در حال بررسی وضعیت اشتراک…", 12f)
         subscriptionCard.addView(subscriptionStatusText)
+        trialStatusText = text("در حال بررسی شرایط دوره آزمایشی رایگان…", 12f)
+        subscriptionCard.addView(trialStatusText)
+        homeTrialButton = button("🎁 فعال‌سازی ۷ روز رایگان") {
+            subscriptionManager?.startTrial() ?: toast("سرویس پرداخت هنوز آماده نیست.")
+        }.apply { visibility = View.GONE }
+        subscriptionCard.addView(homeTrialButton)
+        subscriptionCard.addView(text("پس از پایان دوره آزمایشی، ادامه استفاده تابع شرایط اشتراک و تمدید ثبت‌شده در کافه‌بازار است.", 11f))
         subscriptionCard.addView(button("خرید اشتراک ویژه — ۳۶۵ روزه") {
             subscriptionManager?.subscribe() ?: toast("سرویس پرداخت هنوز آماده نیست.")
         })
@@ -484,12 +512,21 @@ class MainActivity : AppCompatActivity() {
                 }
                 addView(text("🔒", 38f))
                 addView(text("QR کد اتصال قفل است", 17f))
-                addView(text("برای مشاهده کد اتصال، اشتراک ویژه ۳۶۵ روزه را تهیه کنید.", 13f))
+                addView(text("برای مشاهده کد اتصال، دوره آزمایشی واجدشرایط ۷ روزه را فعال کنید یا اشتراک ویژه ۳۶۵ روزه بخرید.", 13f))
+                qrTrialStatusText = text("در حال بررسی شرایط دوره آزمایشی رایگان…", 11f)
+                addView(qrTrialStatusText)
+                qrTrialButton = button("🎁 فعال‌سازی ۷ روز رایگان") {
+                    subscriptionManager?.startTrial() ?: toast("سرویس پرداخت هنوز آماده نیست.")
+                }.apply { visibility = View.GONE }
+                addView(qrTrialButton)
                 addView(button("خرید اشتراک ویژه — ۳۶۵ روزه") {
                     subscriptionManager?.subscribe() ?: toast("سرویس پرداخت هنوز آماده نیست.")
                 })
                 addView(button("بررسی اشتراک") {
                     subscriptionManager?.refresh() ?: toast("سرویس پرداخت هنوز آماده نیست.")
+                })
+                addView(button("بررسی شرایط دوره رایگان") {
+                    subscriptionManager?.checkTrialAvailability() ?: toast("سرویس پرداخت هنوز آماده نیست.")
                 })
             }
             qrFrame.addView(paywall, android.widget.FrameLayout.LayoutParams(
