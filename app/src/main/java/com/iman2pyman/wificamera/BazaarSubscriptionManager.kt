@@ -34,10 +34,12 @@ class BazaarSubscriptionManager(
     @Volatile private var anySubscriptionActive = false
 
     private fun publishPurchaseAvailability() {
-        val canStartNewSubscription = subscriptionStatusKnown && !anySubscriptionActive
+        // An active 7-day trial must NOT block the user's ability to buy the annual plan.
+        // Only prevent duplicate trial activation or offering the trial after annual access exists.
+        val statusReady = subscriptionStatusKnown
         onProducts(
-            annualProductAvailable && canStartNewSubscription,
-            trialProductAvailable && canStartNewSubscription
+            annualProductAvailable && statusReady && !activeAnnualSubscription,
+            trialProductAvailable && statusReady && !activeTrialSubscription && !activeAnnualSubscription
         )
     }
 
@@ -76,13 +78,13 @@ class BazaarSubscriptionManager(
                 val active = anySubscriptionActive
                 val message = when {
                     activeTrialSubscription ->
-                        "اشتراک آزمایشی ۷ روزه شما فعال است؛ تا پایان آن امکان فعال‌سازی اشتراک سالانه وجود ندارد."
+                        "اشتراک آزمایشی ۷ روزه شما فعال است؛ در صورت تمایل می‌توانید همین حالا اشتراک سالانه را نیز خریداری کنید."
                     activeAnnualSubscription ->
-                        "اشتراک سالانه شما فعال است؛ تا پایان آن امکان فعال‌سازی دوره آزمایشی وجود ندارد."
+                        "اشتراک سالانه شما فعال است؛ دوره آزمایشی رایگان دیگری قابل فعال‌سازی نیست."
                     active ->
                         "یک اشتراک فعال برای حساب شما پیدا شد؛ امکان خرید اشتراک دیگری تا پایان آن وجود ندارد."
                     else ->
-                        "اشتراک فعالی پیدا نشد؛ می‌توانید فقط یکی از دوره آزمایشی یا اشتراک یک‌ساله را انتخاب کنید."
+                        "اشتراک فعالی پیدا نشد؛ می‌توانید دوره آزمایشی یا اشتراک یک‌ساله را انتخاب کنید."
                 }
                 onStatus(active, message)
             }
@@ -154,7 +156,7 @@ class BazaarSubscriptionManager(
             return
         }
 
-        // Re-check immediately before opening Bazaar so two subscriptions cannot be activated together.
+        // Re-check immediately before opening Bazaar. Annual purchase is allowed during an active trial.
         onStatus(false, "در حال بررسی اشتراک فعال حساب شما…")
         payment.getSubscribedProducts {
             querySucceed { subscriptions ->
@@ -164,16 +166,20 @@ class BazaarSubscriptionManager(
                 subscriptionStatusKnown = true
                 publishPurchaseAvailability()
 
-                if (anySubscriptionActive) {
-                    val message = when {
-                        activeTrialSubscription -> "اشتراک آزمایشی ۷ روزه شما فعال است؛ تا پایان آن امکان خرید اشتراک سالانه ندارید."
-                        activeAnnualSubscription -> "اشتراک سالانه شما فعال است؛ تا پایان آن امکان فعال‌سازی دوره آزمایشی ندارید."
-                        else -> "برای حساب شما اشتراک فعالی وجود دارد؛ تا پایان آن امکان خرید اشتراک دیگری ندارید."
-                    }
+                if (isTrial && (activeTrialSubscription || activeAnnualSubscription)) {
+                    val message = if (activeTrialSubscription)
+                        "اشتراک آزمایشی ۷ روزه شما از قبل فعال است؛ امکان فعال‌سازی دوباره آن وجود ندارد. خرید اشتراک سالانه همچنان امکان‌پذیر است."
+                    else
+                        "اشتراک سالانه شما فعال است؛ نیازی به فعال‌سازی دوره آزمایشی نیست."
                     onStatus(true, message)
                     return@querySucceed
                 }
+                if (!isTrial && activeAnnualSubscription) {
+                    onStatus(true, "اشتراک سالانه شما از قبل فعال است.")
+                    return@querySucceed
+                }
 
+                // Crucial: an active trial does not prevent starting the annual subscription.
                 beginSubscriptionPurchase(productId, isTrial)
             }
             queryFailed { error ->
