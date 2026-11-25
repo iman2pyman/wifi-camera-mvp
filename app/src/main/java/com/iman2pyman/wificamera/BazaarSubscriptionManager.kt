@@ -12,7 +12,8 @@ import ir.cafebazaar.poolakey.request.PurchaseRequest
  */
 class BazaarSubscriptionManager(
     private val activity: AppCompatActivity,
-    private val onStatus: (Boolean, String) -> Unit
+    private val onStatus: (Boolean, String) -> Unit,
+    private val onPrices: (String) -> Unit
 ) {
     private val payment = Payment(
         context = activity,
@@ -31,6 +32,7 @@ class BazaarSubscriptionManager(
             connectionSucceed {
                 connected = true
                 refresh()
+                refreshSubscriptionPrices()
             }
             connectionFailed { error ->
                 connected = false
@@ -59,6 +61,31 @@ class BazaarSubscriptionManager(
             }
             queryFailed { error ->
                 onStatus(false, "بررسی اشتراک ناموفق بود: ${error.message ?: "خطای نامشخص"}")
+            }
+        }
+    }
+
+
+    /**
+     * Fetch subscription prices from Cafe Bazaar; never hardcode product prices.
+     */
+    private fun refreshSubscriptionPrices() {
+        if (!connected) return
+        payment.getSubscriptionSkuDetails(
+            skuIds = listOf(SUBSCRIPTION_SKU, TRIAL_SUBSCRIPTION_SKU)
+        ) {
+            getSkuDetailsSucceed { details ->
+                val annual = details.firstOrNull { it.sku == SUBSCRIPTION_SKU }
+                val trial = details.firstOrNull { it.sku == TRIAL_SUBSCRIPTION_SKU }
+                onPrices(
+                    listOf(
+                        "قیمت اشتراک ۳۶۵ روزه: ${annual?.price ?: "در کافه‌بازار یافت نشد"}",
+                        "قیمت دوره آزمایشی: ${trial?.price ?: "در کافه‌بازار یافت نشد"}"
+                    ).joinToString("\\n")
+                )
+            }
+            getSkuDetailsFailed { error ->
+                onPrices("دریافت قیمت از کافه‌بازار ناموفق بود: ${error.message ?: "خطای نامشخص"}")
             }
         }
     }
