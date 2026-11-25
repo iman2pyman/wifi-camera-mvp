@@ -53,8 +53,8 @@ class BazaarSubscriptionManager(
                 val active = subscriptions.isNotEmpty()
                 onStatus(
                     active,
-                    if (active) "اشتراک یک‌ساله شما در کافه‌بازار فعال است."
-                    else "اشتراک فعال ۳۶۵ روزه‌ای برای این حساب پیدا نشد."
+                    if (active) "اشتراک شما در کافه‌بازار فعال است."
+                    else "اشتراک فعال پیدا نشد؛ می‌توانید دوره آزمایشی یا اشتراک یک‌ساله را تهیه کنید."
                 )
             }
             queryFailed { error ->
@@ -63,25 +63,26 @@ class BazaarSubscriptionManager(
         }
     }
 
-    fun subscribe() {
+    fun subscribe() = launchSubscriptionFlow(SUBSCRIPTION_SKU, false)
+
+    fun subscribeTrial() = launchSubscriptionFlow(TRIAL_SUBSCRIPTION_SKU, true)
+
+    private fun launchSubscriptionFlow(productId: String, isTrial: Boolean) {
         if (!connected) {
             onStatus(false, "ابتدا کافه‌بازار را نصب و وارد حساب خود کنید، سپس دوباره تلاش کنید.")
             connect()
             return
         }
-        launchSubscriptionFlow()
-    }
-
-    private fun launchSubscriptionFlow() {
         payment.subscribeProduct(
             registry = activity.activityResultRegistry,
             request = PurchaseRequest(
-                productId = SUBSCRIPTION_SKU,
-                payload = "baby-monitor-camera-subscription"
+                productId = productId,
+                payload = if (isTrial) "baby-monitor-camera-trial" else "baby-monitor-camera-subscription"
             )
         ) {
             purchaseFlowBegan {
-                onStatus(false, "صفحه خرید اشتراک در کافه‌بازار باز شد؛ مراحل پرداخت را تکمیل کنید.")
+                onStatus(false, if (isTrial) "صفحه فعال‌سازی دوره آزمایشی رایگان در کافه‌بازار باز شد؛ مراحل را تکمیل کنید."
+                    else "صفحه خرید اشتراک یک‌ساله در کافه‌بازار باز شد؛ مراحل پرداخت را تکمیل کنید.")
             }
             failedToBeginFlow { error ->
                 onStatus(false, "شروع فرایند اشتراک ناموفق بود: ${error.message ?: "خطای نامشخص"}")
@@ -110,6 +111,7 @@ class BazaarSubscriptionManager(
 
     companion object {
         const val SUBSCRIPTION_SKU = "Baby-monitor-camera"
+        const val TRIAL_SUBSCRIPTION_SKU = "trial_subscription"
         private const val RSA_PUBLIC_KEY = "MIHNMA0GCSqGSIb3DQEBAQUAA4G7ADCBtwKBrwC2AVKAXbSFu1D2FCHxx8iTVKzxjM1UpeiBzN+9R4xEtLu8bW8MGcMVKD5Jo1BSxdwXjzvycv3GhUKnNxcn356sVAeYFb9BbnoWszHMEVtLCx4bEW0yWOm9qmrAI05kL/cCs84Q9bFPjRJiSoQ7kOiL/ukuj3Cs1scV5PSphbfU8mtxXCHJK5vHdoGUj6edzIKBH4PlRo4zmQR56Kb5vFUc7I8BSkL/QaK5KGMpIF8CAwEAAQ=="
     }
 }
